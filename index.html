@@ -133,6 +133,8 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .float.heal{color:var(--hp)}
 .float.miss{color:var(--muted);font-size:16px}
 @keyframes floatUp{0%{transform:translate(-50%,8px);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-34px);opacity:0}}
+.predBar{font-family:var(--font-pixel);font-size:12.5px;color:var(--accent);text-align:center;margin-top:-6px}
+.predRow{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
 .vs{font-family:var(--font-pixel);font-size:12px;color:var(--muted);text-align:center;letter-spacing:.3em}
 
 /* message well */
@@ -221,15 +223,25 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
         <input type="text" id="onCode" maxlength="8" autocomplete="off" spellcheck="false" placeholder="k7mq2">
         <button class="btn" type="submit">参加</button>
       </form>
-      <p class="note" id="onNote"></p>
     </div>
+    <div id="onRole" class="panel" hidden>
+      <h3 class="h3" style="margin:0">参加方法を選んでください</h3>
+      <div class="onRow">
+        <button class="btn primary" id="rolePlayer" type="button">対戦する</button>
+        <button class="btn" id="roleSpec" type="button">観戦する</button>
+      </div>
+      <p class="muted" id="roleSlotNote" style="margin:0"></p>
+    </div>
+    <p class="note" id="onNote"></p>
     <div id="onLobby" class="screen" hidden>
       <div class="panel lobby">
         <div><span class="muted">ルームコード</span><div class="code" id="onCodeShow"></div></div>
         <div class="onRow"><button class="btn" id="onCopy" type="button">コードをコピー</button><span id="onLinkRow"><button class="btn primary" id="onCopyLink" type="button">招待URLをコピー</button></span></div>
       </div>
       <dl class="lobbyStatus" id="onStatus"></dl>
-      <h3 class="h3">あなたのキャラ</h3>
+      <div class="onRow" id="specJoinRow" hidden><button class="btn primary" id="specJoin" type="button">対戦相手として参加する</button><span class="muted">対戦枠が空いています</span></div>
+      <p class="muted" id="specHint" style="margin:0" hidden>観戦者として参加中です。対戦が始まると自動で観戦画面に切り替わります。</p>
+      <h3 class="h3" id="rosterHead">あなたのキャラ</h3>
       <div class="roster" id="onRoster"></div>
     </div>
   </section>
@@ -238,6 +250,7 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
     <div class="arena">
       <div class="fighter enemy" id="fe"></div>
       <div class="vs">VS</div>
+      <div class="predBar" id="predBar" hidden></div>
       <div class="fighter player" id="fp"></div>
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
@@ -268,14 +281,14 @@ const CHARS = [
       {name:'斬撃', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
       {name:'二連斬り', cost:15, kind:'attack', power:0.65, hits:2, desc:'2回攻撃'},
       {name:'構え', cost:0, kind:'guard', gain:10, desc:'先制で防御、MP+10'},
-      {name:'疾風一閃', cost:40, kind:'attack', power:2.1, crit:0.25, desc:'威力大・会心率UP'}]},
+      {name:'疾風一閃', cost:40, kind:'attack', power:1.8, crit:0.25, desc:'威力大・会心率UP'}]},
   { id:'mira', name:'ミラ', role:'魔導士', blurb:'打たれ弱いが魔法と回復が強力。',
-    hp:110, mp:100, atk:36, def:14, spd:20,
+    hp:132, mp:100, atk:36, def:16, spd:25,
     colors:{h:'#5b3f8f',s:'#f3d2b3',a:'#7a56b8',w:'#c9a24a',d:'#2a2f3a'},
     sprite:['.....hh.....','....hhhh....','...hhhhhh...','..hhhhhhhh..','...sssss..w.','...sdsds..w.','...sssss..w.','..aaaaaaa.w.','.saaaaaaasw.','..aaaaaaa.w.','..aaaaaaa.w.','..aaaaaaa...'],
     skills:[
       {name:'杖打ち', cost:0, kind:'attack', power:0.7, desc:'弱い物理攻撃'},
-      {name:'フレア', cost:20, kind:'attack', power:1.5, desc:'炎の魔法'},
+      {name:'フレア', cost:20, kind:'attack', power:1.7, desc:'炎の魔法'},
       {name:'毒の霧', cost:18, kind:'attack', power:0.4, poison:3, desc:'3ターン毒状態に'},
       {name:'癒しの光', cost:30, kind:'heal', heal:0.35, desc:'最大HPの35%回復'}]},
   { id:'gard', name:'ガルド', role:'重騎士', blurb:'鈍足だが硬い。しびれで流れを止める。',
@@ -288,14 +301,32 @@ const CHARS = [
       {name:'鉄壁', cost:15, kind:'buff', buff:'defUp', turns:3, desc:'3ターン防御UP'},
       {name:'大地割り', cost:35, kind:'attack', power:1.9, desc:'威力大'}]},
   { id:'rin', name:'リン', role:'盗賊', blurb:'最速。会心と回避で翻弄する。',
-    hp:120, mp:70, atk:30, def:16, spd:34,
+    hp:120, mp:70, atk:33, def:16, spd:34,
     colors:{h:'#2f5a4a',s:'#f0c8a0',a:'#3c4a3f',w:'#d8dde4',d:'#1f2420'},
     sprite:['...hhhhhh...','..hhhhhhhh..','..hhsssssh..','..hsdssdsh..','..hhssssh...','...hhhhh....','..aaaaaaa...','.saaaaaaas..','.w.aaaaa..w.','...aa..aa...','...aa..aa...','..dd....dd..'],
     skills:[
       {name:'急所突き', cost:0, kind:'attack', power:0.9, crit:0.45, desc:'会心率45%'},
       {name:'魔力泥棒', cost:5, kind:'attack', power:0.6, steal:15, desc:'MPを15奪う'},
       {name:'煙玉', cost:15, kind:'buff', buff:'evade', turns:2, desc:'2ターン回避率50%'},
-      {name:'影縫い', cost:30, kind:'attack', power:1.3, stun:0.4, desc:'40%でしびれ'}]}
+      {name:'影縫い', cost:30, kind:'attack', power:1.3, stun:0.4, desc:'40%でしびれ'}]},
+  { id:'shizuku', name:'シズク', role:'侍', blurb:'相手の攻撃を読んで斬り返す。読み合いの達人。',
+    hp:120, mp:60, atk:30, def:20, spd:26,
+    colors:{h:'#1d1d24',s:'#f0c8a0',a:'#a33a3a',w:'#d8dde4',d:'#2a2f3a'},
+    sprite:['.....hh.....','....hhhh....','...hhhhhh...','...hssssh...','...sdssds...','...ssssss...','..aaaaaaaa..','.saaawaaaas.','..aaawaaaa..','...aawwaa...','...aa..aa...','..dd....dd..'],
+    skills:[
+      {name:'居合', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'見切り', cost:15, kind:'counter', counter:1.2, desc:'先制。攻撃されたら無効化して反撃'},
+      {name:'心眼', cost:15, kind:'attack', power:1.1, sure:true, desc:'回避・構えを無視する必中技'},
+      {name:'一刀両断', cost:35, kind:'attack', power:1.8, desc:'威力大'}]},
+  { id:'doran', name:'ドラン', role:'狂戦士', blurb:'捨て身の大振り。削られながらも殴り勝つ。',
+    hp:150, mp:50, atk:34, def:16, spd:18,
+    colors:{h:'#c9c2b0',s:'#d9a07a',a:'#6b3a2a',w:'#9aa3ad',d:'#2a1f1a'},
+    sprite:['.h........h.','.hhhhhhhhhh.','...hhhhhh...','...sdssds...','...ssssss.ww','....ssss..ww','.aaaaaaaaaw.','saaaaaaaaaw.','s.aaaaaaa.w.','..aaa..aaa..','..aaa..aaa..','.ddd....ddd.'],
+    skills:[
+      {name:'斧振り', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'雄叫び', cost:12, kind:'buff', buff:'atkUp', turns:3, desc:'3ターン攻撃UP'},
+      {name:'血の渇き', cost:10, kind:'attack', power:0.9, drain:0.5, desc:'与えたダメージの半分を回復'},
+      {name:'捨て身の一撃', cost:25, kind:'attack', power:2.2, recoil:0.25, desc:'威力特大。反動あり'}]}
 ];
 const CHAR = Object.fromEntries(CHARS.map(c=>[c.id,c]));
 const BUFF_LABEL = {defUp:'防御UP', evade:'回避UP', atkUp:'攻撃UP'};
@@ -343,10 +374,10 @@ function markSelected(container, id){
 
 /* ================= 戦闘エンジン（端末に依存しない純粋な計算） ================= */
 // 状態は A / B の2陣営。結果は「演出ステップ」の列として返す: [文章, 効果, スナップショット]
-function newF(id){ const c=CHAR[id]; return {id, hp:c.hp, mp:Math.floor(c.mp/2), defUp:0, evade:0, atkUp:0, poison:0, stun:0, guard:0}; }
+function newF(id){ const c=CHAR[id]; return {id, hp:c.hp, mp:Math.floor(c.mp/2), defUp:0, evade:0, atkUp:0, poison:0, stun:0, guard:0, counter:0}; }
 function initState(a,b){ return {turn:1, A:newF(a), B:newF(b)}; }
-const pack = f => [f.hp,f.mp,f.defUp,f.evade,f.atkUp,f.poison,f.stun,f.guard];
-const unpack = (id,a) => ({id, hp:a[0], mp:a[1], defUp:a[2], evade:a[3], atkUp:a[4], poison:a[5], stun:a[6], guard:a[7]});
+const pack = f => [f.hp,f.mp,f.defUp,f.evade,f.atkUp,f.poison,f.stun,f.guard,f.counter];
+const unpack = (id,a) => ({id, hp:a[0], mp:a[1], defUp:a[2], evade:a[3], atkUp:a[4], poison:a[5], stun:a[6], guard:a[7], counter:a[8]||0});
 
 function calcDamage(a, t, sk){
   const atk = CHAR[a.id].atk * (a.atkUp>0 ? 1.3 : 1);
@@ -355,7 +386,7 @@ function calcDamage(a, t, sk){
   d *= 0.9 + Math.random()*0.2;
   const crit = Math.random() < (sk.crit ?? 0.05);
   if(crit) d *= 1.5;
-  if(t.guard) d *= 0.4;
+  if(t.guard && !sk.sure) d *= 0.4;
   return {dmg:Math.max(1,Math.round(d)), crit};
 }
 
@@ -366,12 +397,29 @@ function act(st, s, sk, push){
   a.mp -= sk.cost;
   if(sk.kind==='attack'){
     push(`{${s}}の${sk.name}！`, 'l'+s);
+    if(t.counter){
+      const cp = t.counter; t.counter = 0;
+      push(`{${o}}は攻撃を見切った！`, 'm'+o);
+      const r = calcDamage(t, a, {power:cp});
+      a.hp -= r.dmg;
+      push(`${r.crit?'会心の':''}反撃！ {${s}}に${r.dmg}のダメージ`, (r.crit?'c':'h')+s+r.dmg);
+      return;
+    }
     const hits = sk.hits||1;
+    let dealt = 0;
     for(let i=0; i<hits && t.hp>0; i++){
-      if(t.evade>0 && Math.random()<0.5){ push(`{${o}}はひらりとかわした！`, 'm'+o); continue; }
+      if(!sk.sure && t.evade>0 && Math.random()<0.5){ push(`{${o}}はひらりとかわした！`, 'm'+o); continue; }
       const {dmg,crit} = calcDamage(a,t,sk);
-      t.hp -= dmg;
-      push(`${crit?'会心の一撃！ ':''}{${o}}に${dmg}のダメージ${t.guard?'（構えで軽減）':''}`, (crit?'c':'h')+o+dmg);
+      t.hp -= dmg; dealt += dmg;
+      push(`${crit?'会心の一撃！ ':''}{${o}}に${dmg}のダメージ${t.guard&&!sk.sure?'（構えで軽減）':''}`, (crit?'c':'h')+o+dmg);
+    }
+    if(sk.drain && dealt>0 && a.hp>0){
+      const n = Math.min(CHAR[a.id].hp - a.hp, Math.round(dealt*sk.drain));
+      if(n>0){ a.hp += n; push(`{${s}}は${n}吸収した！`, 'r'+s+n); }
+    }
+    if(sk.recoil && dealt>0){
+      const n = Math.max(1, Math.round(dealt*sk.recoil));
+      a.hp -= n; push(`{${s}}は反動で${n}のダメージ`, 'h'+s+n);
     }
     if(t.hp>0){
       if(sk.stun && Math.random()<sk.stun){ t.stun=1; push(`{${o}}はしびれた！`); }
@@ -388,6 +436,8 @@ function act(st, s, sk, push){
     } else if(sk.kind==='guard'){
       a.guard = 1; a.mp = Math.min(CHAR[a.id].mp, a.mp + (sk.gain||0));
       push(`{${s}}は身構えた！ MP+${sk.gain||0}`);
+    } else if(sk.kind==='counter'){
+      a.counter = sk.counter; push(`{${s}}は静かに刀に手をかけた…`);
     }
   }
 }
@@ -397,7 +447,8 @@ function resolveTurn(st0, picks){
   const push = (text,fx) => steps.push([text, fx||'', [pack(st.A), pack(st.B)]]);
   const sk = s => CHAR[st[s].id].skills[picks[s]];
   const order = ['A','B'].sort((x,y)=>{
-    const gx = sk(x).kind==='guard', gy = sk(y).kind==='guard';
+    const pri = k => k==='guard' || k==='counter';
+    const gx = pri(sk(x).kind), gy = pri(sk(y).kind);
     if(gx!==gy) return gx ? -1 : 1;
     const sx = CHAR[st[x].id].spd, sy = CHAR[st[y].id].spd;
     if(sx!==sy) return sy - sx;
@@ -410,6 +461,7 @@ function resolveTurn(st0, picks){
   for(const s of ['A','B']){
     const f = st[s], c = CHAR[f.id];
     f.guard = 0;
+    if(f.counter){ f.counter = 0; if(f.hp>0) push(`{${s}}の見切りは空振りに終わった`); }
     if(f.hp<=0) continue;
     if(f.poison>0){
       const d = Math.max(1, Math.round(c.hp*0.06)); f.hp -= d; f.poison--;
@@ -436,11 +488,15 @@ function cpuChoose(st, side){
   if(heal && rate<0.45 && Math.random()<0.8) return heal.i;
   const guard = usable.find(x=>x.s.kind==='guard');
   if(guard && rate<0.35 && Math.random()<0.3) return guard.i;
+  const ctr = usable.find(x=>x.s.kind==='counter');
+  if(ctr && Math.random()<0.25) return ctr.i;
   const buff = usable.find(x=>x.s.kind==='buff' && !(me[x.s.buff]>0));
   if(buff && Math.random()<0.3) return buff.i;
   const atks = usable.filter(x=>x.s.kind==='attack');
-  const big = [...atks].sort((a,b)=>b.s.cost-a.s.cost)[0];
-  if(big && big.s.cost>=30 && Math.random()<0.65) return big.i;
+  const dr = atks.find(x=>x.s.drain);
+  if(dr && rate<0.5 && Math.random()<0.6) return dr.i;
+  const big = atks.filter(x=>!(x.s.recoil && rate<0.3)).sort((a,b)=>b.s.cost-a.s.cost)[0];
+  if(big && big.s.cost>=25 && Math.random()<0.65) return big.i;
   if(foe.poison===0){ const p = atks.find(x=>x.s.poison); if(p && Math.random()<0.5) return p.i; }
   return atks[Math.floor(Math.random()*atks.length)].i;
 }
@@ -455,16 +511,18 @@ let lines = [];
 let localStage = 'A', localPick = null, localP1 = null;
 let myPick = null;
 let playChain = Promise.resolve();
+let matchOver = null;
 
 function whoLabel(side){
   if(mode==='cpu') return side==='A' ? 'あなた' : 'CPU';
   if(mode==='local') return side==='A' ? '1P' : '2P';
+  if(mode==='online' && ON.role==='spec') return side==='A' ? '1P' : '2P';
   return side===BOTTOM ? 'あなた' : '相手';
 }
 function dispName(side){
   const n = CHAR[ST[side].id].name;
   const mirror = ST.A.id===ST.B.id;
-  return (mode==='local' || mirror) ? `${n}（${whoLabel(side)}）` : n;
+  return (mode==='local' || mirror || (mode==='online' && ON.role==='spec')) ? `${n}（${whoLabel(side)}）` : n;
 }
 const fmt = t => t.replace(/\{([AB])\}/g, (_,s)=>dispName(s));
 const elOf = side => side===BOTTOM ? $('fp') : $('fe');
@@ -482,16 +540,16 @@ function fighterHTML(side){
 
 function beginMatch(st, bottom){
   ST = st; VIEW = clone(st); BOTTOM = bottom;
-  busy = false; myPick = null; localStage = 'A'; localPick = null; lines = [];
+  busy = false; myPick = null; localStage = 'A'; localPick = null; lines = []; matchOver = null;
   $('fp').innerHTML = fighterHTML(bottom);
   $('fe').innerHTML = fighterHTML(other(bottom));
   drawSprite($('fp').querySelector('canvas'), CHAR[st[bottom].id], false);
   drawSprite($('fe').querySelector('canvas'), CHAR[st[other(bottom)].id], true);
   $('msg').innerHTML = '';
   $('result').hidden = true;
-  $('quit').textContent = mode==='online' ? 'ルームを出る' : 'モード選択に戻る';
+  $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : 'ルームを出る') : 'モード選択に戻る';
   showScreen('battle');
-  renderBars(); renderCommands();
+  renderBars(); renderCommands(); renderPredBar();
 }
 
 function renderBars(){
@@ -508,6 +566,7 @@ function renderBars(){
     if(f.stun) chips.push(`<span class="chip stun">しびれ</span>`);
     ['defUp','evade','atkUp'].forEach(k=>{ if(f[k]>0) chips.push(`<span class="chip">${BUFF_LABEL[k]} ${f[k]}</span>`); });
     if(f.guard) chips.push(`<span class="chip">構え中</span>`);
+    if(f.counter) chips.push(`<span class="chip">見切り中</span>`);
     r.querySelector('.chips').innerHTML = chips.join('');
     r.querySelector('.stage').classList.toggle('ko', hp<=0);
   }
@@ -525,6 +584,11 @@ function renderCommands(){
   const cm = $('cmds'), head = $('cmdHead');
   cm.innerHTML=''; cm.classList.toggle('waiting', busy);
   if(!ST) return;
+  if(mode==='online' && ON.role==='spec'){
+    head.textContent = ''; cm.classList.remove('waiting');
+    cm.append(specPanel());
+    return;
+  }
   let side = BOTTOM;
   if(mode==='local'){
     if(localStage==='handoff' && !busy){
@@ -589,6 +653,7 @@ async function playback(steps){
 
 function promptNext(){
   if(mode==='local') say(`${localStage==='B'?'2P':'1P'}の番です`);
+  else if(mode==='online' && ON.role==='spec') say(`TURN ${ST.turn}：両者が技を選んでいます`);
   else say(`${dispName(BOTTOM)}はどうする？`);
 }
 
@@ -598,7 +663,7 @@ function queueResult(r){
     await playback(r.steps);
     ST = r.state; VIEW = clone(ST); myPick = null;
     renderBars();
-    if(r.over){ busy = true; renderCommands(); await sleep(600); showResult(r.over); }
+    if(r.over){ matchOver = r.over; busy = true; renderCommands(); await sleep(600); showResult(r.over); }
     else { busy = false; promptNext(); renderCommands(); }
   });
 }
@@ -642,6 +707,17 @@ function showResult(over){
       {label:'キャラを選び直す', fn:()=>openPick('local')}]);
     return;
   }
+  const pi = (mode==='online') ? ON.predInfo : null;
+  const predNote = (pi && pi.mid===ON.mid && (pi.a+pi.b)>0) ? `観戦者の予想：${dispName('A')} ${pi.a}票 / ${dispName('B')} ${pi.b}票` : '';
+  if(mode==='online' && ON.role==='spec'){
+    const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${CHAR[ST[over].id].name}の勝利！`;
+    const hit = ON.myPred ? (ON.myPred===over ? '予想的中！' : '予想はずれ…') : '';
+    setResult(hit || winner, hit==='予想はずれ…' ? 'small lose' : 'small', hit ? `${winner}｜${sub}` : sub, [
+      {label:'観戦を続ける', primary:true, fn:()=>{ $('result').hidden = true; renderCommands(); }},
+      {label:'ルームを出る', fn:()=>leaveOnline()}],
+      [predNote, '次の対戦が始まると自動で切り替わります'].filter(Boolean).join('｜'));
+    return;
+  }
   const me = BOTTOM;
   const t = over==='draw' ? '引き分け' : over===me ? '勝利！' : '敗北…';
   const cls = over===me ? '' : 'lose';
@@ -654,9 +730,9 @@ function showResult(over){
     if(ON.role==='host'){
       setResult(t, cls, sub, [
         {label:'再戦する', primary:true, fn:hostRematch},
-        {label:'ルームを出る', fn:()=>leaveOnline()}], '');
+        {label:'ルームを出る', fn:()=>leaveOnline()}], predNote);
     } else {
-      setResult(t, cls, sub, [{label:'ルームを出る', fn:()=>leaveOnline()}], 'ホストが「再戦する」を押すと自動で始まります');
+      setResult(t, cls, sub, [{label:'ルームを出る', fn:()=>leaveOnline()}], [predNote, 'ホストが「再戦する」を押すと自動で始まります'].filter(Boolean).join('｜'));
     }
   }
 }
@@ -688,15 +764,23 @@ function startOffline(a, b){
 }
 
 /* ================= オンライン（PeerJS：ブラウザどうしを直接つなぐ） ================= */
-// ホストのブラウザが「ルーム」になり、ゲストはルームコードでそこへ接続する。
-// 戦闘の計算はホスト側で行い、結果（演出ステップ＋確定状態）をゲストへ送る。
+// ホストのブラウザが「ルーム」になる。参加者は「対戦相手（1人）」か「観戦者」を選ぶ。
+// 戦闘の計算はホスト側で行い、結果（演出ステップ＋確定状態）を全員へ送る。
 const PEER_PREFIX = 'taiman-senki-';
-const ON = {peer:null, conn:null, role:null, code:null, mid:null, myChar:null, oppChar:null, oppPick:null, oppReadyTurn:null, played:new Set()};
+const MAX_CLIENTS = 12;
+const ON = {};
+function resetOnline(){
+  Object.assign(ON, {peer:null, conn:null, role:null, code:null, mid:null, myChar:null, oppChar:null,
+    oppPick:null, oppReadyTurn:null, played:new Set(), clients:new Map(), lastState:null, lastOver:null,
+    preds:new Map(), predOpen:false, lobby:{hostChar:null, oppChar:null, oppPresent:false, specCount:0},
+    predInfo:{a:0, b:0, open:false, mid:null}, picks:{turn:0, a:false, b:false}, specCount:0, myPred:null, welcome:null});
+}
+resetOnline();
 
 const PEER_OK = typeof Peer !== 'undefined';
 if(PEER_OK){
   $('mode-online').disabled = false;
-  $('onlineDesc').textContent = 'ルームコードやURLを送って、離れた友達と遊びます。';
+  $('onlineDesc').textContent = 'ルームコードやURLを送って、離れた友達と対戦・観戦します。';
 } else {
   $('onlineDesc').textContent = '通信ライブラリを読み込めませんでした。インターネット接続を確認してください。';
 }
@@ -707,9 +791,37 @@ function randCode(){
   return s;
 }
 function note(t){ $('onNote').textContent = t; }
-function send(msg){ try{ if(ON.conn && ON.conn.open) ON.conn.send(msg); }catch(e){} }
+const isHost = () => ON.role==='host';
+const isSpec = () => ON.role==='spec';
+function sendTo(conn, msg){ try{ if(conn && conn.open) conn.send(msg); }catch(e){} }
+function playerClient(){ for(const c of ON.clients.values()) if(c.role==='player') return c; return null; }
+function broadcast(msg){ for(const c of ON.clients.values()) sendTo(c.conn, msg); }
+// ホスト→対戦相手 / 参加者→ホスト
+function send(msg){ if(isHost()) sendTo(playerClient()?.conn, msg); else sendTo(ON.conn, msg); }
+function specCountNow(){ let n=0; for(const c of ON.clients.values()) if(c.role==='spec') n++; return n; }
 function inviteUrl(){ return location.origin + location.pathname + '?room=' + ON.code; }
 function onlineOppReady(){ return ON.oppReadyTurn===ST?.turn; }
+
+function lobbyInfo(){
+  const p = playerClient();
+  return {t:'lobby', hostChar:ON.myChar, oppChar:p?ON.oppChar:null, oppPresent:!!p, specCount:specCountNow()};
+}
+function predsMsg(){
+  let a=0, b=0;
+  for(const s of ON.preds.values()){ if(s==='A') a++; else if(s==='B') b++; }
+  return {t:'preds', mid:ON.mid, a, b, open:ON.predOpen};
+}
+function picksMsg(){
+  const turn = ST?.turn || 0;
+  return {t:'picks', mid:ON.mid, turn, a:!!(myPick && myPick.turn===turn), b:!!(ON.oppPick && ON.oppPick.turn===turn)};
+}
+// ホストが持っている状況を全員へ配る
+function hostSync(){
+  const l = lobbyInfo(), pm = predsMsg();
+  ON.lobby = l; ON.specCount = l.specCount; ON.predInfo = pm;
+  broadcast(l); broadcast(pm);
+  renderLobby(); renderPredBar();
+}
 
 function netErrorText(err){
   const t = err?.type;
@@ -719,21 +831,27 @@ function netErrorText(err){
   return '接続できませんでした。もう一度お試しください。';
 }
 
+/* ---------- ホスト側 ---------- */
 function hostCreate(attempt=0){
   if(!PEER_OK) return;
   note('ルームを作っています…');
   const code = randCode();
   const peer = new Peer(PEER_PREFIX + code);
   peer.on('open', ()=>{
-    Object.assign(ON, {peer, role:'host', code, mid:null, myChar:null, oppChar:null, oppPick:null, oppReadyTurn:null, played:new Set()});
+    resetOnline(); Object.assign(ON, {peer, role:'host', code});
     enterLobby();
   });
   peer.on('connection', conn=>{
-    if(ON.conn && ON.conn.open){
-      conn.on('open', ()=>{ conn.send({t:'full'}); setTimeout(()=>conn.close(), 500); });
-      return;
-    }
-    attachConn(conn);
+    conn.on('open', ()=>{
+      if(ON.peer!==peer) return;
+      if(ON.clients.size >= MAX_CLIENTS){ sendTo(conn, {t:'full'}); setTimeout(()=>conn.close(), 500); return; }
+      ON.clients.set(conn.peer, {conn, role:null});
+      sendTo(conn, {t:'welcome', slotFree:!playerClient()});
+      sendTo(conn, lobbyInfo());
+    });
+    conn.on('data', d=>hostOnData(conn, d));
+    conn.on('close', ()=>hostOnClose(conn));
+    conn.on('error', ()=>{});
   });
   peer.on('error', err=>{
     if(err?.type==='unavailable-id' && attempt<3){ peer.destroy(); hostCreate(attempt+1); return; }
@@ -741,114 +859,75 @@ function hostCreate(attempt=0){
   });
 }
 
-function guestJoin(code){
-  if(!PEER_OK) return;
-  note('ルームに接続しています…');
-  const peer = new Peer();
-  let opened = false;
-  peer.on('open', ()=>{
-    Object.assign(ON, {peer, role:'guest', code, mid:null, myChar:null, oppChar:null, oppPick:null, oppReadyTurn:null, played:new Set()});
-    const conn = peer.connect(PEER_PREFIX + code, {reliable:true});
-    attachConn(conn);
-    setTimeout(()=>{ if(!ON.conn?.open && ON.peer===peer && !opened){ note('接続に時間がかかっています。ネットワーク環境によってはつながらないことがあります。'); } }, 12000);
-  });
-  peer.on('error', err=>{
-    if(ON.role==='guest' && !ON.conn?.open){ note(netErrorText(err)); peer.destroy(); resetOnline(); }
-  });
-  ON._guestOpened = ()=>{ opened = true; };
-}
-
-function attachConn(conn){
-  ON.conn = conn;
-  conn.on('open', ()=>{
-    ON._guestOpened?.();
-    if(ON.role==='guest'){ note(''); enterLobby(); }
-    send({t:'char', id:ON.myChar});
-    renderLobby();
-  });
-  conn.on('data', onData);
-  conn.on('close', ()=>{ if(ON.conn===conn){ ON.conn=null; opponentLeft(); } });
-  conn.on('error', ()=>{});
-}
-
-function onData(d){
+function hostOnData(conn, d){
   if(!d || typeof d!=='object') return;
-  if(d.t==='char'){
+  const c = ON.clients.get(conn.peer); if(!c) return;
+  if(d.t==='role'){
+    if(d.role==='player'){
+      if(playerClient() && c.role!=='player'){ sendTo(conn, {t:'roleDenied'}); return; }
+      c.role = 'player'; ON.oppChar = null; ON.preds.delete(conn.peer);
+      sendTo(conn, {t:'roleOk', role:'player'});
+      hostSync();
+    } else if(d.role==='spec'){
+      if(c.role==='player') return;
+      c.role = 'spec';
+      sendTo(conn, {t:'roleOk', role:'spec'});
+      if(ON.mid && ON.lastState) sendTo(conn, {t:'specState', mid:ON.mid, state:ON.lastState, over:ON.lastOver});
+      hostSync();
+      sendTo(conn, picksMsg());
+    }
+  } else if(d.t==='char' && c.role==='player'){
     ON.oppChar = CHAR[d.id] ? d.id : null;
-    renderLobby(); maybeHostStart();
-  } else if(d.t==='full'){
-    note('このルームはすでに対戦中です。'); leaveOnline(true);
-  } else if(d.t==='leave'){
-    ON.conn?.close();
-  } else if(ON.role==='host' && d.t==='pick'){
+    hostSync(); maybeHostStart();
+  } else if(d.t==='pick' && c.role==='player'){
     if(d.mid!==ON.mid) return;
     ON.oppPick = {turn:Number(d.turn), idx:Number(d.idx)};
     ON.oppReadyTurn = ON.oppPick.turn;
+    broadcast(picksMsg());
     hostTryResolve();
     if(!busy && !$('battle').hidden) renderCommands();
-  } else if(ON.role==='guest' && d.t==='ready'){
-    ON.oppReadyTurn = Number(d.turn);
-    if(!busy && !$('battle').hidden) renderCommands();
-  } else if(ON.role==='guest' && d.t==='result'){
-    const r = d.r;
-    if(!r || typeof r.mid!=='string' || !validResult(r)) return;
-    if(r.mid!==ON.mid){ if(r.turn===0) guestStart(r); }
-    else guestApply(r);
+  } else if(d.t==='predict' && c.role==='spec'){
+    if(!ON.predOpen || d.mid!==ON.mid || (d.side!=='A' && d.side!=='B')) return;
+    ON.preds.set(conn.peer, d.side);
+    hostSync();
+  } else if(d.t==='leave'){
+    conn.close();
   }
 }
 
-function validResult(r){
-  return r.state && CHAR[r.state.A?.id] && CHAR[r.state.B?.id] && Array.isArray(r.steps) && Number.isInteger(r.turn);
-}
-
-function enterLobby(){
-  mode = 'online';
-  $('onIdle').hidden = true; $('onLobby').hidden = false;
-  $('onCodeShow').textContent = ON.code;
-  $('onLinkRow').hidden = ON.role!=='host';
-  buildRoster($('onRoster'), id=>{
-    ON.myChar = id; markSelected($('onRoster'), id);
-    send({t:'char', id});
-    renderLobby(); maybeHostStart();
-  });
-  if(ON.myChar) markSelected($('onRoster'), ON.myChar);
-  showScreen('online');
-  renderLobby();
-}
-
-function renderLobby(){
-  const dl = $('onStatus'); if(!ON.peer) return;
-  const me = ON.myChar ? CHAR[ON.myChar].name : '未選択';
-  let oppText;
-  if(!ON.conn?.open) oppText = ON.role==='host' ? '参加を待っています…' : '接続していません';
-  else { const oc = CHAR[ON.oppChar]; oppText = oc ? `${oc.name}（${oc.role}）` : '参加済み・キャラ選択中'; }
-  const both = ON.myChar && ON.conn?.open && CHAR[ON.oppChar];
-  const items = [['あなた', `${ON.role==='host'?'ホスト':'ゲスト'}・${me}`], ['相手', oppText]];
-  dl.innerHTML = items.map(([k])=>`<dt>${k}</dt><dd></dd>`).join('') + (both?'<div class="hint">まもなく対戦が始まります</div>':'');
-  dl.querySelectorAll('dd').forEach((dd,i)=>dd.textContent = items[i][1]);
+function hostOnClose(conn){
+  if(!ON.peer) return;
+  const c = ON.clients.get(conn.peer); if(!c) return;
+  ON.clients.delete(conn.peer); ON.preds.delete(conn.peer);
+  if(c.role==='player') opponentLeft();
+  else hostSync();
 }
 
 function maybeHostStart(){
-  if(ON.role!=='host' || ON.mid) return;
-  if(ON.conn?.open && ON.myChar && CHAR[ON.oppChar]) hostStart();
+  if(!isHost() || ON.mid) return;
+  if(playerClient() && ON.myChar && CHAR[ON.oppChar]) hostStart();
 }
 function hostStart(){
   mode = 'online';
   ON.mid = Math.random().toString(36).slice(2,10);
   ON.played = new Set([ON.mid+':0']); ON.oppPick = null; ON.oppReadyTurn = null;
+  ON.preds = new Map(); ON.predOpen = true;
   playChain = Promise.resolve();
   const st = initState(ON.myChar, ON.oppChar);
+  ON.lastState = st; ON.lastOver = null;
   const r = {mid:ON.mid, turn:0, steps:[['{B}が挑戦してきた！',''],['対戦開始！','']], state:st, over:null};
-  send({t:'result', r});
+  broadcast({t:'result', r});
   beginMatch(st, 'A');
+  hostSync();
+  broadcast(picksMsg());
   queueResult(r);
 }
 function hostRematch(){
-  if(!ON.conn?.open || !CHAR[ON.oppChar]){ $('resNote').textContent = '相手が見つかりません。'; return; }
+  if(!playerClient() || !CHAR[ON.oppChar]){ $('resNote').textContent = '対戦相手が見つかりません。'; return; }
   hostStart();
 }
 function hostTryResolve(){
-  if(ON.role!=='host' || !ON.mid || !ST || !myPick || !ON.oppPick) return;
+  if(!isHost() || !ON.mid || !ST || !myPick || !ON.oppPick) return;
   const key = ON.mid+':'+ST.turn;
   if(ON.played.has(key)) return;
   if(myPick.mid!==ON.mid || myPick.turn!==ST.turn || ON.oppPick.turn!==ST.turn) return;
@@ -856,75 +935,275 @@ function hostTryResolve(){
   const sk = CHAR[ST.B.id].skills[gi];
   if(!Number.isInteger(gi) || !sk || sk.cost > ST.B.mp) gi = 0;
   ON.played.add(key);
+  if(ST.turn>=1) ON.predOpen = false;   // 予想は1ターン目の決着で締め切り
   const res = resolveTurn(ST, {A:myPick.idx, B:gi});
   const r = {mid:ON.mid, turn:ST.turn, steps:res.steps, state:res.state, over:res.over};
+  ON.lastState = res.state; ON.lastOver = res.over;
   ON.oppPick = null; ON.oppReadyTurn = null;
-  send({t:'result', r});
+  broadcast({t:'result', r});
+  broadcast({t:'picks', mid:ON.mid, turn:res.state.turn, a:false, b:false});
+  hostSync();
   queueResult(r);
-}
-
-function guestStart(r){
-  mode = 'online';
-  ON.mid = r.mid; ON.played = new Set([r.mid+':0']); ON.oppReadyTurn = null;
-  playChain = Promise.resolve();
-  beginMatch(clone(r.state), 'B');
-  queueResult(r);
-}
-function guestApply(r){
-  const key = r.mid+':'+r.turn;
-  if(ON.played.has(key) || r.turn===0) return;
-  ON.played.add(key); ON.oppReadyTurn = null;
-  queueResult(r);
-}
-
-function onlineSubmitPick(i){
-  myPick = {mid:ON.mid, turn:ST.turn, idx:i};
-  if(ON.role==='host'){ send({t:'ready', turn:ST.turn}); hostTryResolve(); }
-  else send({t:'pick', mid:ON.mid, turn:ST.turn, idx:i});
 }
 
 function opponentLeft(){
-  const inMatch = !!ON.mid && !$('battle').hidden;
+  const inMatch = !!ON.mid;
   ON.mid = null; ON.oppChar = null; ON.oppPick = null; ON.oppReadyTurn = null;
-  if(ON.role==='guest'){
-    if(inMatch || !$('result').hidden){
-      busy = true; renderCommands();
-      setResult('接続が切れました', 'small', 'ホストがルームを閉じたか、通信が途切れました。', [{label:'モード選択に戻る', primary:true, fn:()=>leaveOnline()}]);
-    } else { leaveOnline(true); note('ホストとの接続が切れました。'); }
-    return;
-  }
-  if(inMatch || !$('result').hidden){
+  ON.predOpen = false; ON.preds = new Map(); ON.lastState = null; ON.lastOver = null;
+  if(inMatch) broadcast({t:'matchAborted'});
+  hostSync();
+  if(inMatch && (!$('battle').hidden || !$('result').hidden)){
     busy = true; renderCommands();
     setResult('相手が退出しました', 'small', '', [
       {label:'次の相手を待つ', primary:true, fn:backToLobby},
-      {label:'ルームを閉じる', fn:()=>leaveOnline()}]);
+      {label:'ルームを閉じる', fn:()=>leaveOnline()}],
+      specCountNow() ? '観戦中の人が対戦相手として参加することもできます' : '');
   } else renderLobby();
 }
 function backToLobby(){
   $('result').hidden = true; ST = null;
   enterLobby();
 }
-function resetOnline(){
-  Object.assign(ON, {peer:null, conn:null, role:null, code:null, mid:null, myChar:null, oppChar:null, oppPick:null, oppReadyTurn:null, played:new Set()});
+
+/* ---------- 参加者側（対戦相手・観戦者） ---------- */
+function guestJoin(code){
+  if(!PEER_OK) return;
+  note('ルームに接続しています…');
+  const peer = new Peer();
+  peer.on('open', ()=>{
+    resetOnline(); Object.assign(ON, {peer, role:'pending', code});
+    const conn = peer.connect(PEER_PREFIX + code, {reliable:true});
+    ON.conn = conn;
+    conn.on('data', onData);
+    conn.on('close', ()=>{ if(ON.conn===conn){ ON.conn = null; hostGone(); } });
+    conn.on('error', ()=>{});
+    setTimeout(()=>{ if(ON.peer===peer && !ON.welcome) note('接続に時間がかかっています。ネットワーク環境によってはつながらないことがあります。'); }, 12000);
+  });
+  peer.on('error', err=>{
+    if(!ON.welcome){ note(netErrorText(err)); try{ peer.destroy(); }catch(e){} resetOnline(); }
+  });
 }
+
+function onData(d){
+  if(!d || typeof d!=='object') return;
+  const inBattle = !$('battle').hidden;
+  switch(d.t){
+    case 'welcome':
+      ON.welcome = {slotFree:!!d.slotFree}; showRolePicker(); break;
+    case 'full':
+      leaveOnline(true); note('このルームは満員です。'); break;
+    case 'roleOk':
+      ON.role = d.role==='player' ? 'player' : 'spec';
+      if(ON.role==='player'){ ON.myPred = null; enterLobby(); } else enterSpecLobby();
+      break;
+    case 'roleDenied':
+      ON.welcome = {slotFree:false}; showRolePicker();
+      $('roleSlotNote').textContent = 'ひと足早く対戦枠が埋まりました。観戦で参加できます。';
+      break;
+    case 'lobby':
+      ON.lobby = d; ON.specCount = Number(d.specCount)||0;
+      if(ON.role==='player') ON.oppChar = d.hostChar;
+      if(ON.role==='pending' && ON.welcome){ ON.welcome.slotFree = !d.oppPresent; showRolePicker(); }
+      renderLobby(); renderPredBar();
+      if(isSpec() && inBattle) renderCommands();
+      break;
+    case 'preds':
+      ON.predInfo = d; renderPredBar();
+      if(isSpec() && inBattle) renderCommands();
+      break;
+    case 'picks':
+      ON.picks = d; if(isSpec() && inBattle) renderCommands(); break;
+    case 'ready':
+      if(ON.role==='player'){ ON.oppReadyTurn = Number(d.turn); if(!busy && inBattle) renderCommands(); }
+      break;
+    case 'specState':
+      if(isSpec() && d.state && CHAR[d.state.A?.id] && CHAR[d.state.B?.id]) specJoinMidway(d);
+      break;
+    case 'result': {
+      const r = d.r;
+      if(!r || typeof r.mid!=='string' || !validResult(r)) return;
+      if(ON.role!=='player' && !isSpec()) return;
+      if(r.mid!==ON.mid){ if(r.turn===0) followerStart(r); }
+      else followerApply(r);
+      break;
+    }
+    case 'matchAborted':
+      if(isSpec()) specAborted(); break;
+    case 'leave':
+      ON.conn?.close(); break;
+  }
+}
+
+function validResult(r){
+  return r.state && CHAR[r.state.A?.id] && CHAR[r.state.B?.id] && Array.isArray(r.steps) && Number.isInteger(r.turn);
+}
+
+function followerStart(r){
+  mode = 'online';
+  ON.mid = r.mid; ON.played = new Set([r.mid+':0']); ON.oppReadyTurn = null; ON.myPred = null;
+  ON.picks = {mid:r.mid, turn:1, a:false, b:false};
+  playChain = Promise.resolve();
+  beginMatch(clone(r.state), isSpec() ? 'A' : 'B');
+  queueResult(r);
+}
+function followerApply(r){
+  const key = r.mid+':'+r.turn;
+  if(ON.played.has(key) || r.turn===0) return;
+  ON.played.add(key); ON.oppReadyTurn = null;
+  queueResult(r);
+}
+function specJoinMidway(d){
+  mode = 'online';
+  ON.mid = d.mid; ON.played = new Set(); ON.myPred = null;
+  playChain = Promise.resolve();
+  beginMatch(clone(d.state), 'A');
+  say('観戦を開始しました');
+  if(d.over){ matchOver = d.over; busy = true; renderCommands(); showResult(d.over); }
+  else promptNext();
+}
+function specAborted(){
+  ON.mid = null; busy = true; renderCommands();
+  setResult('対戦相手が退出しました', 'small', '', [
+    {label:'ロビーで待つ', primary:true, fn:()=>{ $('result').hidden = true; ST = null; enterSpecLobby(); }},
+    {label:'ルームを出る', fn:()=>leaveOnline()}],
+    '対戦枠が空いたので、ロビーから対戦相手として参加することもできます');
+}
+function hostGone(){
+  if(!ON.peer) return;
+  if(!$('battle').hidden || !$('result').hidden){
+    busy = true; renderCommands();
+    setResult('接続が切れました', 'small', 'ホストがルームを閉じたか、通信が途切れました。', [{label:'モード選択に戻る', primary:true, fn:()=>leaveOnline()}]);
+  } else { leaveOnline(true); note('ホストとの接続が切れました。'); }
+}
+
+function onlineSubmitPick(i){
+  myPick = {mid:ON.mid, turn:ST.turn, idx:i};
+  if(isHost()){ send({t:'ready', turn:ST.turn}); broadcast(picksMsg()); hostTryResolve(); }
+  else send({t:'pick', mid:ON.mid, turn:ST.turn, idx:i});
+}
+
+/* ---------- 画面 ---------- */
+function showOnlinePanel(which){
+  $('onIdle').hidden = which!=='idle';
+  $('onRole').hidden = which!=='role';
+  $('onLobby').hidden = which!=='lobby';
+}
+function showRolePicker(){
+  mode = 'online';
+  showOnlinePanel('role');
+  const free = !!ON.welcome?.slotFree;
+  $('rolePlayer').disabled = !free;
+  $('roleSlotNote').textContent = free ? '対戦相手は1人まで。観戦は何人でも参加できます。' : '対戦枠は埋まっています。観戦で参加できます。';
+  note('');
+  showScreen('online');
+}
+function enterLobby(){
+  mode = 'online';
+  showOnlinePanel('lobby');
+  $('onCodeShow').textContent = ON.code;
+  $('onLinkRow').hidden = !isHost();
+  $('rosterHead').hidden = false; $('onRoster').hidden = false; $('specHint').hidden = true;
+  buildRoster($('onRoster'), id=>{
+    ON.myChar = id; markSelected($('onRoster'), id);
+    if(isHost()){ hostSync(); maybeHostStart(); }
+    else { send({t:'char', id}); renderLobby(); }
+  });
+  if(ON.myChar) markSelected($('onRoster'), ON.myChar);
+  note(''); showScreen('online'); renderLobby();
+}
+function enterSpecLobby(){
+  mode = 'online';
+  showOnlinePanel('lobby');
+  $('onCodeShow').textContent = ON.code;
+  $('onLinkRow').hidden = true;
+  $('rosterHead').hidden = true; $('onRoster').hidden = true; $('specHint').hidden = false;
+  note(''); showScreen('online'); renderLobby();
+}
+function renderLobby(){
+  const dl = $('onStatus');
+  if(!ON.peer || $('onLobby').hidden) return;
+  const nm = id => CHAR[id] ? `${CHAR[id].name}（${CHAR[id].role}）` : null;
+  let items, both;
+  if(isHost()){
+    const p = playerClient();
+    items = [['あなた', `ホスト・${nm(ON.myChar)||'キャラ未選択'}`], ['対戦相手', p ? (nm(ON.oppChar)||'参加済み・キャラ選択中') : '参加を待っています…']];
+    both = ON.myChar && p && CHAR[ON.oppChar];
+  } else if(ON.role==='player'){
+    items = [['あなた', `対戦相手・${nm(ON.myChar)||'キャラ未選択'}`], ['ホスト', nm(ON.lobby.hostChar)||'キャラ選択中']];
+    both = ON.myChar && CHAR[ON.lobby.hostChar];
+  } else {
+    items = [['1P（ホスト）', nm(ON.lobby.hostChar)||'キャラ選択中'],
+             ['2P', ON.lobby.oppPresent ? (nm(ON.lobby.oppChar)||'参加済み・キャラ選択中') : '参加を待っています…'],
+             ['あなた', '観戦者']];
+    both = CHAR[ON.lobby.hostChar] && CHAR[ON.lobby.oppChar];
+  }
+  items.push(['観戦', `${ON.specCount}人`]);
+  dl.innerHTML = items.map(()=>'<dt></dt><dd></dd>').join('') + (both ? '<div class="hint">まもなく対戦が始まります</div>' : '');
+  dl.querySelectorAll('dt').forEach((e,i)=>e.textContent = items[i][0]);
+  dl.querySelectorAll('dd').forEach((e,i)=>e.textContent = items[i][1]);
+  $('specJoinRow').hidden = !(isSpec() && !ON.lobby.oppPresent);
+}
+function predText(){
+  const pi = ON.predInfo;
+  if(!ST || !pi || pi.mid!==ON.mid || (pi.a+pi.b)===0) return '';
+  return `勝敗予想 ${dispName('A')} ${pi.a} : ${pi.b} ${dispName('B')}`;
+}
+function renderPredBar(){
+  const el = $('predBar');
+  if(mode!=='online' || !ON.mid || !ST){ el.hidden = true; return; }
+  const n = ON.specCount, pt = predText(), open = ON.predInfo?.open && ON.predInfo?.mid===ON.mid;
+  if(!n && !pt){ el.hidden = true; return; }
+  el.textContent = [`観戦 ${n}人`, pt, open ? '予想受付中' : ''].filter(Boolean).join('｜');
+  el.hidden = false;
+}
+function specPanel(){
+  const d = document.createElement('div'); d.className = 'waitPanel';
+  const nameOf = s => `${whoLabel(s)} ${CHAR[ST[s].id].name}`;
+  const pi = ON.predInfo || {};
+  if(!matchOver && pi.open && pi.mid===ON.mid && !ON.myPred){
+    d.innerHTML = '<p>どちらが勝つと思う？</p><small>1ターン目が終わるまで予想できます</small>';
+    const row = document.createElement('div'); row.className = 'predRow';
+    ['A','B'].forEach(s=>{
+      const b = document.createElement('button'); b.type='button'; b.className='btn'; b.id='pred-'+s;
+      b.textContent = nameOf(s);
+      b.addEventListener('click', ()=>{ ON.myPred = s; send({t:'predict', mid:ON.mid, side:s}); renderCommands(); });
+      row.append(b);
+    });
+    d.append(row);
+    return d;
+  }
+  const pk = ON.picks || {};
+  const turnOk = pk.mid===ON.mid && pk.turn===ST.turn;
+  const st = s => (turnOk && pk[s==='A'?'a':'b']) ? '選択済み' : '考え中…';
+  let main, sub;
+  if(matchOver){ main = '決着しました'; sub = '次の対戦が始まると自動で切り替わります'; }
+  else if(busy){ main = '行動中…'; sub = ''; }
+  else { main = `観戦中｜TURN ${ST.turn}`; sub = `1P：${st('A')}　2P：${st('B')}`; }
+  if(ON.myPred) sub = [sub, `あなたの予想：${nameOf(ON.myPred)}`].filter(Boolean).join('｜');
+  d.innerHTML = '<p></p><small></small>';
+  d.querySelector('p').textContent = main;
+  d.querySelector('small').textContent = sub;
+  return d;
+}
+
+function resetOnlineScreens(){ showOnlinePanel('idle'); }
 function leaveOnline(stayOnOnlineScreen){
-  send({t:'leave'});
-  const p = ON.peer, c = ON.conn;
+  if(isHost()) broadcast({t:'leave'}); else send({t:'leave'});
+  const p = ON.peer, conns = [ON.conn, ...[...ON.clients.values()].map(c=>c.conn)];
   resetOnline();
-  try{ c?.close(); }catch(e){}
+  conns.forEach(c=>{ try{ c?.close(); }catch(e){} });
   setTimeout(()=>{ try{ p?.destroy(); }catch(e){} }, 300);
   $('result').hidden = true; ST = null;
-  if(stayOnOnlineScreen){ $('onIdle').hidden = false; $('onLobby').hidden = true; showScreen('online'); }
+  if(stayOnOnlineScreen){ resetOnlineScreens(); showScreen('online'); }
   else { mode = null; showScreen('home'); }
 }
-window.addEventListener('pagehide', ()=>{ send({t:'leave'}); });
+window.addEventListener('pagehide', ()=>{ if(isHost()) broadcast({t:'leave'}); else send({t:'leave'}); });
 
 /* ================= イベント ================= */
 $('mode-cpu').addEventListener('click', ()=>openPick('cpu'));
 $('mode-local').addEventListener('click', ()=>openPick('local'));
 $('mode-online').addEventListener('click', ()=>{
-  mode = 'online';
-  $('onIdle').hidden = false; $('onLobby').hidden = true; note('');
+  mode = 'online'; resetOnlineScreens(); note('');
   showScreen('online');
 });
 $('pickBack').addEventListener('click', ()=>{ mode=null; showScreen('home'); });
@@ -936,6 +1215,9 @@ $('onJoinForm').addEventListener('submit', e=>{
   if(!/^[a-z0-9]{4,8}$/.test(code)){ note('コードは英数字で入力してください（例：k7mq2）'); return; }
   guestJoin(code);
 });
+$('rolePlayer').addEventListener('click', ()=>send({t:'role', role:'player'}));
+$('roleSpec').addEventListener('click', ()=>send({t:'role', role:'spec'}));
+$('specJoin').addEventListener('click', ()=>send({t:'role', role:'player'}));
 function copyText(text, btn, label){
   const done = ()=>{ btn.textContent='コピーしました'; setTimeout(()=>btn.textContent=label, 1500); };
   if(navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>window.prompt('コピーしてください', text));
@@ -954,10 +1236,11 @@ $('quit').addEventListener('click', ()=>{
   if(code && /^[a-z0-9]{4,8}$/i.test(code) && PEER_OK){
     mode = 'online';
     $('onCode').value = code.toLowerCase();
-    showScreen('online');
+    resetOnlineScreens(); showScreen('online');
     note('招待されたルームのコードが入っています。「参加」を押してください。');
   }
 })();
+
 </script>
 </body>
 </html>
