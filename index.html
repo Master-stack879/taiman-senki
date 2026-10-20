@@ -73,6 +73,9 @@ h2{font-family:var(--font-pixel);font-weight:400;font-size:19px;margin:0}
 .card:hover{background:var(--panel-2);transform:translateY(-2px)}
 .card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .card.sel{background:var(--panel-2);box-shadow:inset 0 0 0 2px var(--accent)}
+.card[disabled]{cursor:not-allowed;opacity:.55}
+.card[disabled]:hover{background:var(--panel);transform:none}
+.card .bl.lock{color:var(--accent)}
 .card canvas{width:72px;height:72px;image-rendering:pixelated;background:var(--well);border-radius:4px}
 .card .nm{font-family:var(--font-pixel);font-size:19px;line-height:1.2}
 .card .rl{font-size:12px;color:var(--accent);margin-left:6px}
@@ -203,6 +206,10 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rgEnd{align-items:center;text-align:center}
 .rgEnd h2{font-size:34px;color:var(--accent)}
 .rgEnd h2.lose{color:var(--muted)}
+.rgEnd .got{margin:0;font-family:var(--font-pixel);color:var(--accent)}
+.shop .mode{background:var(--panel-2)}
+.shop .mode:hover:not([disabled]){background:var(--well)}
+.souls{font-family:var(--font-pixel);color:var(--accent);font-variant-numeric:tabular-nums}
 
 @media (prefers-reduced-motion:reduce){
   .shake canvas,.lunge-r canvas,.lunge-l canvas{animation:none}
@@ -384,22 +391,25 @@ function drawSprite(cv, c, flip){
     g.fillRect(flip ? 11-x : x, y, 1, 1);
   }));
 }
-function buildRoster(container, onPick){
+// lockOf：使えないキャラなら理由の文章を返す（冒険モードの未解放キャラ）。省略すると全員選べる
+function buildRoster(container, onPick, lockOf){
   const max = {hp:200, mp:100, atk:40, def:32, spd:36};
   const lbl = {hp:'HP', mp:'MP', atk:'攻撃', def:'防御', spd:'速さ'};
   container.innerHTML='';
   CHARS.forEach(c=>{
     const b = document.createElement('button');
     b.className='card'; b.type='button'; b.id=container.id+'-'+c.id; b.dataset.id=c.id;
+    const lock = lockOf?.(c.id);
+    if(lock) b.disabled = true;
     const cv = document.createElement('canvas'); cv.width=12; cv.height=12; drawSprite(cv,c,false);
     const body = document.createElement('div');
     body.innerHTML = `<div class="nm">${c.name}<span class="rl">${c.role}</span></div>
-      <div class="bl">${c.blurb}</div>
+      <div class="bl${lock?' lock':''}">${lock || c.blurb}</div>
       <div class="stats">${Object.keys(max).map(k=>`<span>${lbl[k]}</span><i><b style="width:${Math.round(c[k]/max[k]*100)}%"></b></i><span>${c[k]}</span>`).join('')}</div>`;
     const sk = document.createElement('div'); sk.className='skl';
     sk.innerHTML = c.skills.map(s=>`<b>${s.name}</b>`).join('');
     b.append(cv, body, sk);
-    b.addEventListener('click', ()=>onPick(c.id));
+    if(!lock) b.addEventListener('click', ()=>onPick(c.id));
     container.append(b);
   });
 }
@@ -869,26 +879,29 @@ const RG_NODE = {
 // 難易度。unlock：この難易度を踏破すると選べるようになる
 // ai：敵が考えて技を選ぶ確率（それ以外はランダム）。smart：考えるときに賢い選び方（rgSmartChoose）をする
 // eliteUp：4階の幻影の最大技の威力上昇。foeSkills：敵ごとの技の差し替え（{敵のキー:{技の番号:技}}）
-// reward：報酬の質（RG_REWARD への上書き）
+// reward：報酬の質（RG_REWARD への上書き）。soulMul：戦魂の倍率
+// growthAdj：この難易度だけのキャラ別成長率の補正（{キャラ:{能力:増減}}。RG_GROWTH に足す）
 const RG_DIFFS = [
   {id:'easy', name:'やさしい', ready:true,
    floors:['battle','battle','battle','elite','boss'],
    pools:[['slime','bat'], ['goblin','bat','slime'], ['goblin','skeleton']],
-   enemyMul:0.36, eliteMul:0.89, bossMul:1.12, growth:0.14, feathers:1, ai:0.6, eliteExp:22,
+   enemyMul:0.36, eliteMul:0.89, bossMul:1.12, growth:0.14, feathers:1, ai:0.6, eliteExp:22, soulMul:1,
    desc:'全5階・1階1戦。序盤で育てて最上階のボスに挑む。復活の羽を1枚持って出発。'},
   {id:'normal', name:'ふつう', ready:true, unlock:'easy',
    floors:['battle','battle','battle','elite','boss'],
    pools:[['slime','bat','goblin'], ['goblin','skeleton','bat'], ['skeleton','goblin']],
-   enemyMul:0.4, eliteMul:1.1, bossMul:1.08, growth:0.1, feathers:1, ai:0.9, eliteExp:22, eliteUp:0.2,
+   enemyMul:0.4, eliteMul:1.1, bossMul:1.08, growth:0.1, feathers:1, ai:0.9, eliteExp:22, eliteUp:0.2, soulMul:1.5,
    foeSkills:{king:{2:{name:'威圧の薙ぎ払い', cost:20, kind:'attack', power:0.7, hits:2, stun:0.2, desc:'2回攻撃・20%でしびれ'}}},
    reward:{healChance:0.45},
    desc:'敵がよく考えて戦い、4階の幻影は得意技を磨いている。ボスの薙ぎ払いはしびれを呼ぶ。'},
   {id:'hard', name:'むずかしい', ready:true, unlock:'normal',
    floors:['battle','battle','battle','elite','boss'],
    pools:[['bat','goblin'], ['skeleton','goblin'], ['skeleton','goblin']],
-   enemyMul:0.44, eliteMul:0.95, bossMul:1.27, growth:0.16, feathers:1, ai:0.82, smart:true, eliteExp:22, eliteUp:0.29,
+   enemyMul:0.44, eliteMul:0.95, bossMul:1.27, growth:0.16, feathers:1, ai:0.82, smart:true, eliteExp:22, eliteUp:0.29, soulMul:2,
    foeSkills:{king:{1:{name:'王家の秘薬', cost:30, kind:'heal', heal:0.3, desc:'最大HPの30%回復'}}},
    reward:{healChance:0.6},   // 強化2つの報酬が出にくく、回復か強化かを選ぶ場面が増える
+   // キャラ差を縮める（補正なしだとリン約22%・ガルド約7%）。打たれ弱さが響くキャラを底上げし、速さで有利なリンは控えめに
+   growthAdj:{gard:{atk:1, hp:3}, kai:{hp:3}, mira:{hp:3}, rin:{def:-1, hp:-3}},
    desc:'敵は隙を見逃さずとどめを狙い、ボスは秘薬で傷を癒やす。強化を2つ並べた報酬は出にくい。'}
 ];
 const RG_DIFF = Object.fromEntries(RG_DIFFS.map(d=>[d.id,d]));
@@ -903,7 +916,12 @@ const RG_GROWTH = {
   shizuku:{hp:14, atk:2, def:2, spd:1, mp:5},
   doran:  {hp:17, atk:3, def:3, spd:1, mp:5}
 };
-const rgGrowth = run => RG_GROWTH[run.charId];
+// 難易度ごとの補正（RG_DIFFS の growthAdj）を足した、そのランの成長率
+function rgGrowth(run){
+  const g = {...RG_GROWTH[run.charId]}, adj = RG_DIFF[run.diff].growthAdj?.[run.charId] || {};
+  for(const k in adj) g[k] += adj[k];
+  return g;
+}
 // 撃破後の報酬の数値
 // healChance：HPが減っているとき（救済ライン超）に「回復 vs 強化」の2択になる確率。それ以外は強化2つ
 // 基準：報酬1回分 ≒ レベルアップ約2回分（回復系はHPの割合なので別扱い）
@@ -913,10 +931,61 @@ const RG_RESCUE = 0.3;   // HPがこの割合以下なら、報酬の片方を�
 const pickOne = a => a[Math.floor(Math.random()*a.length)];
 const shuffle = a => { a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
 
-function rgNewRunState(diffId, charId){
+/* ---- 強くてニューゲーム：戦魂と永続強化（冒険をまたいで持ち越す） ---- */
+// 戦魂：1階突破ごとに floor、ボス撃破で boss を足し、難易度の倍率（RG_DIFFS の soulMul）を掛ける。負けても到達分は入る
+const RG_SOUL = {floor:3, boss:10};
+// 永続強化。prices の数が段階数（上限）。効き目は報酬（RG_REWARD）との比率で決まるので、報酬を変えたらここも見直す
+const RG_UPGRADES = [
+  {id:'hp', name:'初期HP+5', prices:[20,40,60], hp:5, desc:'冒険の開始時の最大HPが上がる'},
+  {id:'mp', name:'初期MP+5', prices:[30,60], mp:5, desc:'冒険の開始時の最大MPが上がる'},
+  {id:'reroll', name:'報酬の引き直し', prices:[80], desc:'1回の冒険で1度だけ、報酬を選び直せる'},
+  {id:'three', name:'報酬3択', prices:[150], from:2, desc:'3階・4階を突破したあとの報酬が3つから選べる'}   // from：3択になる最初の階（0始まり）。序盤の3択は効きすぎるので後半2回だけ
+];
+const RG_UPGRADE = Object.fromEntries(RG_UPGRADES.map(u=>[u.id,u]));
+// 冒険モードで使えるようになる条件（対戦モードでは最初から全員使える）。diff 以上の難易度を chars 人の別キャラで踏破
+const RG_CHAR_UNLOCK = {
+  shizuku:{diff:'easy', chars:2, text:'「やさしい」以上を2人の別キャラで踏破すると解放'},
+  doran:  {diff:'normal', chars:1, text:'「ふつう」以上を踏破すると解放'}
+};
+// 持ち越しデータ（進行中の冒険とは別に保存）。cleared：難易度ごとの踏破したキャラ
+function rgNewMeta(){
+  return {v:1, souls:0, ups:Object.fromEntries(RG_UPGRADES.map(u=>[u.id,0])), cleared:Object.fromEntries(RG_DIFFS.map(d=>[d.id,[]]))};
+}
+// 条件の難易度より上で踏破したキャラも数える
+function rgCharOpen(meta, id){
+  const u = RG_CHAR_UNLOCK[id];
+  if(!u) return true;
+  const above = RG_DIFFS.slice(RG_DIFFS.findIndex(d=>d.id===u.diff));
+  return new Set(above.flatMap(d=>meta.cleared[d.id])).size >= u.chars;
+}
+// 次の段階の値段。上限まで買っていたら null
+const rgUpPrice = (meta, id) => RG_UPGRADE[id].prices[meta.ups[id]] ?? null;
+function rgBuy(meta, id){
+  const p = rgUpPrice(meta, id);
+  if(p==null || meta.souls < p) return false;
+  meta.souls -= p; meta.ups[id]++;
+  return true;
+}
+function rgSoulsFor(run, cleared){
+  const d = RG_DIFF[run.diff];
+  return Math.floor(((cleared ? d.floors.length : run.floor)*RG_SOUL.floor + (cleared ? RG_SOUL.boss : 0)) * d.soulMul);
+}
+// 冒険の結果を持ち越しデータへ反映する。戻り値：獲得した戦魂と、新しく冒険で使えるようになったキャラ
+function rgSettleMeta(meta, run, cleared){
+  const souls = rgSoulsFor(run, cleared), before = CHARS.filter(c=>rgCharOpen(meta, c.id));
+  meta.souls += souls;
+  const list = meta.cleared[run.diff];
+  if(cleared && !list.includes(run.charId)) list.push(run.charId);
+  return {souls, chars:CHARS.filter(c=>!before.includes(c) && rgCharOpen(meta, c.id)).map(c=>c.id)};
+}
+
+// meta：持ち越しデータ。永続強化はランの開始時に冒険データへ書き込む（途中で買っても進行中の冒険は変わらない）
+function rgNewRunState(diffId, charId, meta){
   const ch = clone(CHAR[charId]); delete ch.id;
+  const ups = meta?.ups || {};
+  ch.hp += (ups.hp||0)*RG_UPGRADE.hp.hp; ch.mp += (ups.mp||0)*RG_UPGRADE.mp.mp;
   return {v:2, diff:diffId, charId, ch, lv:1, exp:0, hp:ch.hp, floor:0, feathers:RG_DIFF[diffId].feathers,
-    picks:[], stage:'map', battle:null, offer:null, wins:0, turns:0};
+    picks:[], stage:'map', battle:null, offer:null, wins:0, turns:0, three:!!ups.three, rerolls:ups.reroll ? 1 : 0};
 }
 
 function rgEnemy(run){
@@ -982,8 +1051,8 @@ function rgGainExp(run, n){
   return ups;
 }
 
-// 撃破後の2択。heal:true が回復系
-function rgOffers(run){
+// 撃破後の報酬（n 択）。heal:true が回復系
+function rgOffers(run, n){
   const ch = run.ch, W = rgReward(run);
   const ups = [
     {t:'hp',  v:W.hp,   name:'体力強化', desc:`最大HP+${W.hp}（同じだけ回復）`},
@@ -1004,8 +1073,14 @@ function rgOffers(run){
     {t:'heal', v:W.heal2, heal:true, name:'薬草', desc:`最大HPの${Math.round(W.heal2*100)}%回復`}
   ];
   const hurt = run.hp < ch.hp;
-  if(hurt && (run.hp <= ch.hp*RG_RESCUE || Math.random() < W.healChance)) return shuffle([pickOne(heals), pickOne(ups)]);
-  return shuffle(ups).slice(0,2);
+  if(hurt && (run.hp <= ch.hp*RG_RESCUE || Math.random() < W.healChance)) return shuffle([pickOne(heals), ...(n>2 ? shuffle(ups).slice(0,n-1) : [pickOne(ups)])]);
+  return shuffle(ups).slice(0,n);
+}
+// 報酬の引き直し（1ランに rerolls 回）。同じ数の選択肢を rgOffers で作り直すので救済ルールもそのまま守られる
+function rgReroll(run){
+  if(!(run.rerolls > 0) || run.stage!=='reward') return false;
+  run.rerolls--; run.offer = rgOffers(run, run.offer.length);
+  return true;
 }
 
 function rgApply(run, o){
@@ -1044,7 +1119,7 @@ function rgCommitWin(run, st, revived){
   const gain = st.B.u.exp || 0, ups = rgGainExp(run, gain);
   run.battle = null;
   if(boss){ run.stage = 'cleared'; return {type:'clear', foe:st.B.u.name, revived}; }
-  run.stage = 'reward'; run.offer = rgOffers(run);
+  run.stage = 'reward'; run.offer = rgOffers(run, run.three && run.floor >= RG_UPGRADE.three.from ? 3 : 2);
   return {type:'win', foe:st.B.u.name, gain, ups, turn:st.turn, revived};
 }
 function rgAfterReward(run, i){ rgApply(run, run.offer[i]); run.offer = null; run.floor++; run.stage = 'map'; }
@@ -1053,7 +1128,7 @@ function rgAfterReward(run, i){ rgApply(run, run.offer[i]); run.offer = null; ru
 let R = null;              // 進行中の冒険（保存データと同じ形）
 let RB = {node:'battle', outcome:null};
 let rgBackFn = null;
-const RG_SAVE = 'taiman-senki:rogue-run', RG_BEST = 'taiman-senki:rogue-best';
+const RG_SAVE = 'taiman-senki:rogue-run', RG_BEST = 'taiman-senki:rogue-best', RG_META = 'taiman-senki:rogue-meta';
 function lsGet(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 function lsSet(k, v){ try{ if(v==null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 function rgLoad(){
@@ -1062,7 +1137,20 @@ function rgLoad(){
   if(!['map','battle','reward'].includes(r.stage) || r.floor>=RG_DIFF[r.diff].floors.length) return null;
   if(r.stage==='battle' && !(r.battle?.state?.A?.u && r.battle.state.B?.u)) return null;
   if(r.stage==='reward' && !Array.isArray(r.offer)) return null;
+  if(r.rerolls!=null && !Number.isInteger(r.rerolls)) return null;
+  if(r.three!=null && typeof r.three!=='boolean') return null;
   return r;
+}
+// 持ち越しデータ（戦魂・永続強化・キャラの解放）。形が違えば壊れているとみなし、初期状態から始める
+function rgMeta(){
+  const m = lsGet(RG_META), n = rgNewMeta();
+  const count = (x, max) => Number.isInteger(x) && x>=0 && x<=max;
+  if(!m || typeof m!=='object' || m.v!==n.v || !count(m.souls, 1e9) || !m.ups || typeof m.ups!=='object' || !m.cleared || typeof m.cleared!=='object') return n;
+  if(!RG_UPGRADES.every(u=>count(m.ups[u.id], u.prices.length)) || !RG_DIFFS.every(d=>Array.isArray(m.cleared[d.id]))) return n;
+  n.souls = m.souls;
+  for(const u of RG_UPGRADES) n.ups[u.id] = m.ups[u.id];
+  for(const d of RG_DIFFS) n.cleared[d.id] = [...new Set(m.cleared[d.id].filter(isRosterId))];
+  return n;
 }
 // 冒険が終わったら保存を消す（再読み込みでやり直せないように、結果が決まった時点で即座に）
 function rgSave(){ lsSet(RG_SAVE, ['map','battle','reward'].includes(R.stage) ? R : null); refreshRogueMode(); }
@@ -1082,6 +1170,14 @@ function rgRecord(run, cleared){
   if(cleared) rec.clears++;
   best[run.diff] = rec; lsSet(RG_BEST, best);
   return rec;
+}
+// 冒険の結果（負け・踏破）を記録と持ち越しデータへ反映する。結果が決まった時点で1回だけ呼ぶ
+function rgSettle(run, cleared){
+  const before = RG_DIFFS.filter(d=>rgUnlocked(d, rgBest()));
+  const record = rgRecord(run, cleared);
+  const meta = rgMeta(), got = rgSettleMeta(meta, run, cleared);
+  lsSet(RG_META, meta);
+  return {record, souls:got.souls, total:meta.souls, chars:got.chars, diffs:RG_DIFFS.filter(d=>!before.includes(d) && rgUnlocked(d, rgBest()))};
 }
 function refreshRogueMode(){
   const r = rgLoad();
@@ -1138,15 +1234,45 @@ function rgShowDiffs(){
   });
   b.append(g);
   const ul = el('ul','rules');
-  ['HPは自然には回復しない',`HPが最大の${Math.round(RG_RESCUE*100)}%以下なら報酬に必ず回復が入る`,'戦闘中にやめても、その続きから再開'].forEach(t=>ul.append(el('li','',t)));
-  b.append(ul);
+  ['HPは自然には回復しない',`HPが最大の${Math.round(RG_RESCUE*100)}%以下なら報酬に必ず回復が入る`,'戦闘中にやめても、その続きから再開','階を突破するたびに戦魂が手に入る（負けても到達分）'].forEach(t=>ul.append(el('li','',t)));
+  b.append(ul, rgShopPanel());
+}
+
+// 強くてニューゲーム：戦魂で永続強化を買う
+function rgShopPanel(){
+  const meta = rgMeta(), p = el('div','panel shop');
+  const head = el('div','subhead');
+  head.append(el('h3','h3','強くてニューゲーム'), el('span','souls',`戦魂 ${meta.souls}`));
+  p.append(head, el('p','muted',`戦魂は1階突破ごとに${RG_SOUL.floor}、ボス撃破で+${RG_SOUL.boss}（${RG_DIFFS.filter(d=>d.soulMul!==1).map(d=>`${d.name}×${d.soulMul}`).join('、')}）。強化は次に始める冒険から効きます。`));
+  const g = el('div','modes');
+  RG_UPGRADES.forEach(u=>{
+    const lv = meta.ups[u.id], max = u.prices.length, price = rgUpPrice(meta, u.id);
+    const extra = price==null ? '強化済み' : `戦魂 ${price}` + (meta.souls<price ? `（あと${price-meta.souls}）` : '');
+    const buy = ()=>askConfirm(`${u.name}を強化しますか？`, `戦魂を${price}使います（所持 ${meta.souls}）。取り消しはできません。`, '強化する', ()=>{
+      const m = rgMeta();
+      if(rgBuy(m, u.id)) lsSet(RG_META, m);
+      rgShowDiffs(); $('rgUp-'+u.id)?.focus();
+    });
+    g.append(choiceBtn('rgUp-'+u.id, u.name + (max>1 ? `（${lv}/${max}）` : ''), u.desc, price!=null && meta.souls>=price ? buy : null, extra));
+  });
+  p.append(g);
+  return p;
+}
+function rgPerksText(meta){
+  const u = meta.ups, t = [];
+  if(u.hp) t.push(`初期HP+${u.hp*RG_UPGRADE.hp.hp}`);
+  if(u.mp) t.push(`初期MP+${u.mp*RG_UPGRADE.mp.mp}`);
+  if(u.reroll) t.push('報酬の引き直し');
+  if(u.three) t.push(`報酬3択（${RG_UPGRADE.three.from+1}階から）`);
+  return t.join('・');
 }
 
 function rgShowPick(diffId){
   const b = rgView('使うキャラを選んでください', rgShowDiffs);
-  b.append(el('p','muted',`難易度：${RG_DIFF[diffId].name}`));
+  const meta = rgMeta(), perks = rgPerksText(meta);
+  b.append(el('p','muted',`難易度：${RG_DIFF[diffId].name}` + (perks ? `｜永続強化：${perks}` : '')));
   const ro = el('div','roster'); ro.id = 'rgRoster'; b.append(ro);
-  buildRoster(ro, id=>{ R = rgNewRunState(diffId, id); rgShowMap(); });
+  buildRoster(ro, id=>{ R = rgNewRunState(diffId, id, meta); rgShowMap(); }, id=>rgCharOpen(meta, id) ? null : RG_CHAR_UNLOCK[id].text);
 }
 
 function rgResume(){
@@ -1214,8 +1340,7 @@ function rgBeginBattle(resume){
 function rgTurn(i){
   const r = resolveTurn(ST, {A:i, B:rgFoeChoose(ST, R)});
   const out = rgCommitTurn(R, r);
-  if(out.type==='lose') RB.record = rgRecord(R, false);
-  if(out.type==='clear') RB.record = rgRecord(R, true);
+  if(out.type==='lose' || out.type==='clear') RB.settle = rgSettle(R, out.type==='clear');
   RB.outcome = out;
   rgSave();
   queueResult(r);
@@ -1246,23 +1371,31 @@ function rgShowReward(){
   const b = rgView('報酬', null);
   b.append(rgStatusPanel());
   const rescue = R.hp <= R.ch.hp*RG_RESCUE;
-  b.append(el('p','cmdHead', rescue ? 'HPが危ない。回復も選べます' : 'どちらかひとつを選んでください'));
-  const g = el('div','modes');
+  b.append(el('p','cmdHead', rescue ? 'HPが危ない。回復も選べます' : R.offer.length>2 ? 'ひとつを選んでください' : 'どちらかひとつを選んでください'));
+  const g = el('div', R.offer.length>2 ? 'modes three' : 'modes');
   R.offer.forEach((it,i)=>g.append(choiceBtn(`rgPick-${i}`, it.name, it.desc, ()=>{ rgAfterReward(R, i); rgShowMap(); }, it.heal ? '回復' : '強化')));
   b.append(g);
+  if(R.rerolls>0){
+    const x = el('button','btn',`報酬を引き直す（この冒険で残り${R.rerolls}回）`); x.type='button'; x.id='rgReroll';
+    x.addEventListener('click', ()=>{ if(rgReroll(R)){ rgSave(); rgShowReward(); } });
+    b.append(x);
+  }
 }
 
 function rgFinish(cleared){
-  const run = R, rec = RB.record || rgRecord(run, cleared); R = null;
+  const run = R, s = RB.settle || rgSettle(run, cleared), rec = s.record; R = null; RB.settle = null;
   const b = rgView('冒険の記録', null);
   const p = el('div','panel rgEnd');
   p.append(el('h2', cleared ? '' : 'lose', cleared ? '踏破！' : '冒険失敗'));
   const dl = el('dl','lobbyStatus');
   [['キャラ', `${CHAR[run.charId].name}（${CHAR[run.charId].role}）Lv${run.lv}`], ['難易度', RG_DIFF[run.diff].name],
    ['到達', `${cleared ? RG_DIFF[run.diff].floors.length : run.floor+1}F／${RG_DIFF[run.diff].floors.length}F`], ['勝利', `${run.wins}回・合計${run.turns}ターン`],
-   ['強化', run.picks.length ? run.picks.join('、') : 'なし'], ['記録', `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F`]]
+   ['強化', run.picks.length ? run.picks.join('、') : 'なし'], ['記録', `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F`],
+   ['戦魂', `+${s.souls}（所持 ${s.total}）`]]
     .forEach(([k,v])=>dl.append(el('dt','',k), el('dd','',v)));
   p.append(dl);
+  s.diffs.forEach(d=>p.append(el('p','got',`難易度「${d.name}」が選べるようになった！`)));
+  s.chars.forEach(id=>p.append(el('p','got',`${CHAR[id].name}（${CHAR[id].role}）が冒険で使えるようになった！`)));
   const row = el('div','onRow');
   const again = el('button','btn primary','もう一度挑戦'); again.type='button'; again.id='rgAgain';
   again.addEventListener('click', ()=>rgShowPick(run.diff));
