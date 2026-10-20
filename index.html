@@ -870,9 +870,18 @@ const RG_DIFFS = [
   {id:'hard', name:'むずかしい', ready:false, desc:'準備中'}
 ];
 const RG_DIFF = Object.fromEntries(RG_DIFFS.map(d=>[d.id,d]));
-// レベル：累計経験値の到達ラインと、1レベルごとの上昇量
+// レベル：累計経験値の到達ライン
 const RG_LV_EXP = [0, 10, 25, 45, 70, 100, 135];
-const RG_LV_UP = {hp:12, atk:2, def:2, spd:1, mp:5};
+// キャラ別の成長率（1レベルごとの上昇量）。冒険モード専用で、対戦モードの基本値（CHARS）は変えない
+const RG_GROWTH = {
+  kai:    {hp:10, atk:2, def:1, spd:1, mp:5},
+  mira:   {hp:8,  atk:1, def:2, spd:1, mp:5},   // 回復魔法があるぶん控えめ
+  gard:   {hp:14, atk:3, def:2, spd:1, mp:5},   // 火力不足を補う
+  rin:    {hp:14, atk:3, def:2, spd:1, mp:5},   // 打たれ弱さを補う
+  shizuku:{hp:12, atk:2, def:1, spd:1, mp:5},
+  doran:  {hp:12, atk:3, def:2, spd:1, mp:5}
+};
+const rgGrowth = run => RG_GROWTH[run.charId];
 // 撃破後の報酬の数値
 // healChance：HPが減っているとき（救済ライン超）に「回復 vs 強化」の2択になる確率。それ以外は強化2つ
 const RG_REWARD = {hp:65, stat:13, spd:10, mp:20, pow:0.6, cost:10, heal:0.45, heal2:0.3, heal2Up:10, healChance:0.55};
@@ -915,8 +924,9 @@ function rgGainExp(run, n){
   const ups = [];
   while(run.lv < RG_LV_EXP.length && run.exp >= RG_LV_EXP[run.lv]){
     run.lv++;
-    for(const k in RG_LV_UP) run.ch[k] += RG_LV_UP[k];
-    run.hp += RG_LV_UP.hp;
+    const g = rgGrowth(run);
+    for(const k in g) run.ch[k] += g[k];
+    run.hp += g.hp;
     ups.push(run.lv);
   }
   return ups;
@@ -1166,7 +1176,10 @@ function rgBattleEnd(){
     }}]);
   } else if(o.type==='win'){
     const lines = [o.revived ? '復活の羽で立ち上がり、勝利をもぎ取った！' : `${o.turn}ターンで${o.foe}を撃破`, `経験値+${o.gain}`];
-    if(o.ups.length) lines.push(`レベルアップ！ Lv${R.lv}（最大HP+${RG_LV_UP.hp*o.ups.length} 攻撃+${RG_LV_UP.atk*o.ups.length} 防御+${RG_LV_UP.def*o.ups.length}）`);
+    if(o.ups.length){
+      const g = rgGrowth(R), n = o.ups.length, lbl = {hp:'最大HP', atk:'攻撃', def:'防御', spd:'速さ', mp:'MP'};
+      lines.push(`レベルアップ！ Lv${R.lv}（${Object.keys(lbl).filter(k=>g[k]).map(k=>`${lbl[k]}+${g[k]*n}`).join(' ')}）`);
+    }
     setResult('勝利！', '', lines.join('｜'), [{label:'報酬を選ぶ', primary:true, fn:rgShowReward}]);
   } else if(o.type==='clear'){
     setResult('踏破！', '', `${o.foe}を倒した！`, [{label:'結果を見る', primary:true, fn:()=>rgFinish(true)}]);
