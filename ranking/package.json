@@ -6,7 +6,8 @@
     "test": "firebase emulators:exec --only firestore --project demo-taiman \"node --test test/rules.test.mjs\"",
     "emulators": "firebase emulators:start --only firestore,auth --project demo-taiman",
     "test:page": "firebase emulators:exec --only firestore,auth --project demo-taiman \"node test/page.test.mjs\"",
-    "test:game": "firebase emulators:exec --only firestore,auth --project demo-taiman \"node test/game.test.mjs\""
+    "test:game": "firebase emulators:exec --only firestore,auth --project demo-taiman \"node test/game.test.mjs\"",
+    "test:transfer": "firebase emulators:exec --only firestore,auth --project demo-taiman \"node test/transfer.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",

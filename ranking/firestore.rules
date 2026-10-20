@@ -1,11 +1,17 @@
 rules_version = '2';
 
-// タイマン戦記：無限回廊オンラインランキング
+// タイマン戦記：無限回廊オンラインランキングと、短い引き継ぎコード
 //
 // scores/{id}  … 1件の記録。誰でも読める。追加だけ（変更・削除は不可）。
 // limits/{uid} … 連続投稿よけ。端末（匿名ログイン）ごとの最終投稿時刻だけを持つ。
+// transfers/{code}  … 引き継ぎコード1件（ID がコード）。中身はセーブコードの文字列と発行時刻。
+//                     コードを知っている人だけがその1件を読める（一覧は不可）。発行から7日を過ぎると読めない。
+// spent/{code}      … 使用済みの印（「使用済み」と「存在しない」を見分けるため）。中身は使った時刻だけ。
+// tlimits/{uid}     … 引き継ぎコードの連続発行よけ（limits と同じ仕組み）。
 //
 // 記録の追加は、scores の追加と limits/{uid} の更新を1回の一括書き込み（batch）で行う。
+// 引き継ぎコードの発行は transfers の追加と tlimits/{uid} の更新を、
+// 読み込みは transfers の削除と spent の追加を、それぞれ1回の一括書き込みで行う。
 // 管理画面（Firebase コンソール）からの削除にはこのルールはかからない。
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -39,6 +45,56 @@ service cloud.firestore {
         // 同じ一括書き込みで limits/{uid} を今の時刻に更新していること
         && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.last == request.time;
       allow update, delete: if false;
+    }
+
+    // 引き継ぎコード：見間違えやすい 0/O・1/I/L を除いた31文字から8文字
+    function validCode(code) { return code.matches('^[2-9A-HJKMNP-Z]{8}$'); }
+    // 引き継ぎコードの有効期間（日）と、同じ端末から次に発行できるまでの秒数
+    function transferDays() { return 7; }
+    function transferCooldownSec() { return 60; }
+    function transferAlive(d) { return request.time < d.at + duration.value(transferDays(), 'd'); }
+
+    match /transfers/{code} {
+      // 期限内なら読める。無いコードは「無い」と返す（期限切れは読めない＝弾かれる）
+      allow get: if validCode(code) && (resource == null || transferAlive(resource.data));
+      allow list: if false;
+      allow create: if request.auth != null && validCode(code)
+        && request.resource.data.keys().hasOnly(['save', 'at'])
+        && request.resource.data.keys().hasAll(['save', 'at'])
+        // セーブコードの文字列（TSK<版>.<base64url>.<チェックサム>）。中身の確認はゲーム側の rgParseCode
+        && request.resource.data.save is string
+        && request.resource.data.save.size() <= 4000
+        && request.resource.data.save.matches('^TSK[0-9]{1,3}[.][A-Za-z0-9_-]+[.][0-9a-f]{8}$')
+        && request.resource.data.at == request.time
+        && getAfter(/databases/$(database)/documents/tlimits/$(request.auth.uid)).data.last == request.time;
+      // 読み込み（1回限り）：期限内のコードを、spent の追加と一緒に消す
+      allow delete: if transferAlive(resource.data)
+        && existsAfter(/databases/$(database)/documents/spent/$(code));
+      allow update: if false;
+    }
+
+    match /spent/{code} {
+      allow get: if validCode(code);
+      allow list: if false;
+      // 同じ一括書き込みで transfers/{code} を消していること
+      allow create: if validCode(code)
+        && exists(/databases/$(database)/documents/transfers/$(code))
+        && !existsAfter(/databases/$(database)/documents/transfers/$(code))
+        && request.resource.data.keys().hasOnly(['at'])
+        && request.resource.data.at == request.time;
+      allow update, delete: if false;
+    }
+
+    match /tlimits/{uid} {
+      allow read: if false;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['last'])
+        && request.resource.data.last == request.time;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['last'])
+        && request.resource.data.last == request.time
+        && request.time >= resource.data.last + duration.value(transferCooldownSec(), 's');
+      allow delete: if false;
     }
 
     match /limits/{uid} {
