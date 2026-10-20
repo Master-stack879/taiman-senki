@@ -177,6 +177,13 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .btn.primary{background:var(--accent);color:var(--well)}
 .btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
+.warn{display:flex;align-items:flex-start;gap:12px;background:var(--well);border-left:3px solid var(--accent);border-radius:5px;padding:10px 12px;font-size:13px}
+.warn p{margin:0;flex:1}
+.warn .link{flex:none}
+.codeBox{all:unset;box-sizing:border-box;display:block;width:100%;min-height:7.5em;background:var(--well);color:var(--ink);font-family:monospace;font-size:13px;line-height:1.5;padding:8px 10px;border-radius:5px;word-break:break-all;white-space:pre-wrap;overflow-wrap:anywhere}
+.codeBox:focus-visible{outline:2px solid var(--accent)}
+.err{margin:0;color:var(--hp-low);font-size:13px}
+.ok{margin:0;color:var(--hp);font-size:13px}
 .link{all:unset;cursor:pointer;color:var(--muted);font-size:12.5px;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
 .link:focus-visible{outline:2px solid var(--accent)}
 
@@ -285,6 +292,7 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   <section id="rogue" class="screen" hidden>
     <div class="subhead"><h2 id="rgTitle">ローグライト</h2><button class="link" id="rgBack" type="button">戻る</button></div>
+    <div class="warn" id="rgInApp" role="note" hidden><p></p><button class="link" id="rgInAppClose" type="button">閉じる</button></div>
     <div id="rgBody" class="screen"></div>
   </section>
 
@@ -1129,8 +1137,17 @@ let R = null;              // 進行中の冒険（保存データと同じ形�
 let RB = {node:'battle', outcome:null};
 let rgBackFn = null;
 const RG_SAVE = 'taiman-senki:rogue-run', RG_BEST = 'taiman-senki:rogue-best', RG_META = 'taiman-senki:rogue-meta';
-function lsGet(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
-function lsSet(k, v){ try{ if(v==null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+// localStorage が使えない・書き込めない環境（アプリ内ブラウザ・プライベートモードなど）では、ページを開いている間だけメモリに持つ
+const LS_MEM = new Map();
+function lsGet(k){
+  if(LS_MEM.has(k)){ const s = LS_MEM.get(k); return s==null ? null : JSON.parse(s); }
+  try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; }
+}
+function lsSet(k, v){
+  const s = v==null ? null : JSON.stringify(v);
+  try{ if(s==null) localStorage.removeItem(k); else localStorage.setItem(k, s); LS_MEM.delete(k); }catch(e){ LS_MEM.set(k, s); }
+}
+const LS_OK = (()=>{ try{ const k = 'taiman-senki:probe'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; }catch(e){ return false; } })();
 function rgLoad(){
   const r = lsGet(RG_SAVE);
   if(!r || r.v!==2 || !RG_DIFF[r.diff]?.ready || !isRosterId(r.charId) || !r.ch) return null;
@@ -1142,16 +1159,19 @@ function rgLoad(){
   return r;
 }
 // 持ち越しデータ（戦魂・永続強化・キャラの解放）。形が違えば壊れているとみなし、初期状態から始める
-function rgMeta(){
-  const m = lsGet(RG_META), n = rgNewMeta();
-  const count = (x, max) => Number.isInteger(x) && x>=0 && x<=max;
-  if(!m || typeof m!=='object' || m.v!==n.v || !count(m.souls, 1e9) || !m.ups || typeof m.ups!=='object' || !m.cleared || typeof m.cleared!=='object') return n;
-  if(!RG_UPGRADES.every(u=>count(m.ups[u.id], u.prices.length)) || !RG_DIFFS.every(d=>Array.isArray(m.cleared[d.id]))) return n;
+const rgCount = (x, max) => Number.isInteger(x) && x>=0 && x<=max;
+// 形を確かめて整えた持ち越しデータを返す。壊れていたら null。strict：知らないキャラや重複も壊れているとみなす（セーブコード用）
+function rgCheckMeta(m, strict){
+  const n = rgNewMeta();
+  if(!m || typeof m!=='object' || m.v!==n.v || !rgCount(m.souls, 1e9) || !m.ups || typeof m.ups!=='object' || !m.cleared || typeof m.cleared!=='object') return null;
+  if(!RG_UPGRADES.every(u=>rgCount(m.ups[u.id], u.prices.length)) || !RG_DIFFS.every(d=>Array.isArray(m.cleared[d.id]))) return null;
+  if(strict && !RG_DIFFS.every(d=>m.cleared[d.id].every(isRosterId) && new Set(m.cleared[d.id]).size===m.cleared[d.id].length)) return null;
   n.souls = m.souls;
   for(const u of RG_UPGRADES) n.ups[u.id] = m.ups[u.id];
   for(const d of RG_DIFFS) n.cleared[d.id] = [...new Set(m.cleared[d.id].filter(isRosterId))];
   return n;
 }
+const rgMeta = () => rgCheckMeta(lsGet(RG_META)) || rgNewMeta();
 // 冒険が終わったら保存を消す（再読み込みでやり直せないように、結果が決まった時点で即座に）
 function rgSave(){ lsSet(RG_SAVE, ['map','battle','reward'].includes(R.stage) ? R : null); refreshRogueMode(); }
 // 記録。壊れた値が入っていても止まらないよう、形を確かめてから使う
@@ -1163,6 +1183,45 @@ function rgBest(){
   }
   return out;
 }
+// セーブコード用の厳しい確認。知らない難易度・ありえない値があれば null
+function rgCheckBest(b){
+  if(!b || typeof b!=='object' || Array.isArray(b) || !Object.keys(b).every(k=>RG_DIFF[k])) return null;
+  const out = {};
+  for(const d of RG_DIFFS){
+    const r = b[d.id], top = d.floors.length;
+    if(r==null) continue;
+    if(typeof r!=='object' || !rgCount(r.clears, 1e9) || !rgCount(r.bestFloor, top) || (r.clears>0 && r.bestFloor!==top)) return null;
+    out[d.id] = {clears:r.clears, bestFloor:r.bestFloor};
+  }
+  return out;
+}
+
+/* ---- セーブコード：持ち越しデータと記録を文字列にして、別のブラウザへ移す（進行中の冒険は含めない） ---- */
+// 形式：TSK<版>.<中身（JSON を base64url）>.<中身のチェックサム>
+const RG_CODE_VER = 1;
+function rgHash(s){ let h = 0x811c9dc5; for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h>>>0).toString(16).padStart(8,'0'); }
+function rgExportCode(){
+  const body = btoa(JSON.stringify({meta:rgMeta(), best:rgBest()})).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  return `TSK${RG_CODE_VER}.${body}.${rgHash(body)}`;
+}
+// 戻り値：{meta, best} か {error:理由}
+function rgParseCode(text){
+  const s = String(text||'').replace(/\s+/g,'');
+  if(!s) return {error:'セーブコードが入力されていません。'};
+  const m = /^TSK(\d+)\.([A-Za-z0-9_-]+)\.([0-9a-f]{8})$/.exec(s);
+  if(!/^TSK\d+\./.test(s)) return {error:'タイマン戦記のセーブコードではありません。'};
+  if(+s.slice(3, s.indexOf('.'))!==RG_CODE_VER) return {error:'このゲームとは版が違うセーブコードです。書き出したページを最新にしてから、もう一度書き出してください。'};
+  if(!m) return {error:'セーブコードの形式が正しくありません。途中が欠けていないか確かめてください。'};
+  if(rgHash(m[2])!==m[3]) return {error:'セーブコードが壊れているか、書き換えられています。コピーし直してください。'};
+  let data;
+  try{ data = JSON.parse(atob(m[2].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return {error:'セーブコードの中身を読めませんでした。'}; }
+  if(!data || typeof data!=='object') return {error:'セーブコードの中身を読めませんでした。'};
+  if(data.meta?.v!==rgNewMeta().v) return {error:'このゲームとは版が違うセーブコードです。'};
+  const meta = rgCheckMeta(data.meta, true), best = rgCheckBest(data.best);
+  if(!meta || !best) return {error:'セーブコードの中身に、ありえない値が入っています（書き換えられている可能性があります）。'};
+  return {meta, best};
+}
+const rgUpSteps = meta => RG_UPGRADES.reduce((a,u)=>a+meta.ups[u.id], 0);
 function rgRecord(run, cleared){
   const best = rgBest();
   const rec = best[run.diff] || {clears:0, bestFloor:0};
@@ -1188,8 +1247,13 @@ const rgD = () => RG_DIFF[R.diff];
 // やさしいを踏破するとふつう、ふつうを踏破するとむずかしいが選べる
 const rgUnlocked = (d, best) => d.ready && (!d.unlock || (best[d.unlock]?.clears || 0) > 0);
 
+// アプリ内ブラウザ（Discord・LINE・Instagram・X など）では記録が消えたり、別のブラウザから見えなかったりする。判定は完全ではない
+const IN_APP = /Discord|\bLine\/|Instagram|FBAN|FBAV|Twitter|\bX\/\d|MicroMessenger|KAKAOTALK|; wv\)/i.test(navigator.userAgent||'');
+const RG_INAPP_HIDE = 'taiman-senki:inapp-hide';
+const RG_INAPP_TEXT = 'このブラウザでは記録が消えることがあります。メニューから『ブラウザで開く』を選び、セーブコードで記録を移してください。';
 function rgView(title, back){
   $('rgTitle').textContent = title;
+  $('rgInApp').hidden = !IN_APP || lsGet(RG_INAPP_HIDE)===true;
   rgBackFn = back; $('rgBack').hidden = !back;
   $('result').hidden = true;
   const b = $('rgBody'); b.innerHTML = '';
@@ -1235,7 +1299,65 @@ function rgShowDiffs(){
   b.append(g);
   const ul = el('ul','rules');
   ['HPは自然には回復しない',`HPが最大の${Math.round(RG_RESCUE*100)}%以下なら報酬に必ず回復が入る`,'戦闘中にやめても、その続きから再開','階を突破するたびに戦魂が手に入る（負けても到達分）'].forEach(t=>ul.append(el('li','',t)));
-  b.append(ul, rgShopPanel());
+  b.append(ul, rgShopPanel(), rgCodePanel());
+}
+
+// セーブコードの書き出し・読み込み。アプリ内ブラウザの判定は外れることがあるので、案内はここに常に載せる
+function rgCodePanel(){
+  const p = el('div','panel'); p.id = 'rgCode';
+  p.append(el('h3','h3','セーブコード'),
+    el('p','muted','戦魂・永続強化・キャラの解放・記録を、別のブラウザや端末へ移せます（進行中の冒険は含みません）。Discord・LINE・Instagram・X などのアプリ内で開いていると記録が消えることがあります。メニューから『ブラウザで開く』を選び、セーブコードで記録を移してください。'));
+  if(!LS_OK) p.append(el('p','err','このブラウザでは保存ができないため、ページを閉じると記録が消えます。セーブコードを書き出しておいてください。'));
+  const row = el('div','onRow');
+  const ex = el('button','btn','セーブコードを書き出す'); ex.type='button'; ex.id='rgExport';
+  const im = el('button','btn','セーブコードを読み込む'); im.type='button'; im.id='rgImport';
+  row.append(ex, im);
+  const area = el('div','screen');
+  p.append(row, area);
+  const box = (ro)=>{ const t = el('textarea','codeBox'); t.id = 'rgCodeText'; t.rows = 3; t.spellcheck = false; t.setAttribute('autocomplete','off'); t.setAttribute('aria-label','セーブコード'); t.readOnly = ro; return t; };
+  ex.addEventListener('click', ()=>{
+    area.innerHTML = '';
+    const t = box(true); t.value = rgExportCode();
+    const cp = el('button','btn primary','コピー'); cp.type='button'; cp.id='rgCodeCopy';
+    const msg = el('p','muted','このコードを、移したい先のブラウザで「セーブコードを読み込む」に貼り付けてください。'); msg.setAttribute('aria-live','polite');
+    cp.addEventListener('click', ()=>rgCopyCode(t, msg));
+    t.addEventListener('focus', ()=>t.select());
+    const r = el('div','onRow'); r.append(cp);
+    area.append(t, r, msg);
+  });
+  im.addEventListener('click', ()=>{
+    area.innerHTML = '';
+    const t = box(false); t.placeholder = 'TSK1. から始まるセーブコードを貼り付け';
+    const go = el('button','btn primary','読み込む'); go.type='button'; go.id='rgCodeLoad';
+    const msg = el('p','err',''); msg.setAttribute('role','alert');
+    go.addEventListener('click', ()=>{
+      const got = rgParseCode(t.value);
+      if(got.error){ msg.textContent = got.error; return; }
+      msg.textContent = '';
+      const cur = rgMeta();
+      askConfirm('セーブコードを読み込みますか？',
+        `今の戦魂${cur.souls}、強化${rgUpSteps(cur)}段階が、コードの内容（戦魂${got.meta.souls}、強化${rgUpSteps(got.meta)}段階）に置き換わります。キャラの解放と記録も置き換わります。進行中の冒険はそのまま残ります。`,
+        '置き換える', ()=>{
+          lsSet(RG_META, got.meta); lsSet(RG_BEST, got.best);
+          rgShowDiffs();
+          const done = el('p','ok','セーブコードを読み込みました。'); done.setAttribute('role','status');
+          $('rgCode').append(done); $('rgImport').focus();
+        });
+    });
+    const r = el('div','onRow'); r.append(go);
+    area.append(t, r, msg); t.focus();
+  });
+  return p;
+}
+// コピーできない環境では、コードを選択した状態にして長押しでコピーしてもらう
+function rgCopyCode(t, msg){
+  const fallback = ()=>{
+    t.focus(); t.select(); t.setSelectionRange(0, t.value.length);
+    let ok = false; try{ ok = document.execCommand('copy'); }catch(e){}
+    msg.textContent = ok ? 'コピーしました。' : 'コピーできませんでした。選択されている文字をコピーしてください（長押し →「コピー」）。';
+  };
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(t.value).then(()=>{ msg.textContent = 'コピーしました。'; }, fallback);
+  else fallback();
 }
 
 // 強くてニューゲーム：戦魂で永続強化を買う
@@ -1854,6 +1976,8 @@ $('mode-online').addEventListener('click', ()=>{
   showScreen('online');
 });
 $('rgBack').addEventListener('click', ()=>rgBackFn && rgBackFn());
+$('rgInApp').querySelector('p').textContent = RG_INAPP_TEXT;
+$('rgInAppClose').addEventListener('click', ()=>{ lsSet(RG_INAPP_HIDE, true); $('rgInApp').hidden = true; });
 refreshRogueMode();
 $('pickBack').addEventListener('click', ()=>{ mode=null; showScreen('home'); });
 $('onBack').addEventListener('click', ()=>{ if(ON.peer) leaveOnline(); else { mode=null; showScreen('home'); } });
