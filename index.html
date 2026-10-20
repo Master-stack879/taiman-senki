@@ -215,6 +215,18 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rgEnd{align-items:center;text-align:center}
 .rgEnd h2{font-size:34px;color:var(--accent)}
 .rgEnd h2.lose{color:var(--muted)}
+.rkNameBox{gap:8px}
+.rkNameBox label{font-size:13px;color:var(--muted)}
+.rkNameBox input[type=text]{width:100%;max-width:18em;letter-spacing:.04em}
+.rkNameBox p{margin:0}
+.rkResult{display:flex;flex-direction:column;align-items:center;gap:8px}
+.rkResult p{margin:0}
+.rkTable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.rkTable th{font-weight:400;color:var(--muted);font-size:12.5px;text-align:left;padding:4px 6px;border-bottom:1px solid var(--panel-2)}
+.rkTable td{padding:6px;border-bottom:1px solid var(--panel-2);unicode-bidi:isolate;overflow-wrap:anywhere}
+.rkTable td:nth-child(1), .rkTable td:nth-child(4){text-align:right;font-family:var(--font-pixel);white-space:nowrap}
+.rkTable td:nth-child(5){color:var(--muted);font-size:12.5px;white-space:nowrap}
+.rkTable tbody tr:nth-child(-n+3) td:nth-child(1){color:var(--accent)}
 .rgEnd .got{margin:0;font-family:var(--font-pixel);color:var(--accent)}
 .shop .mode{background:var(--panel-2)}
 .shop .mode:hover:not([disabled]){background:var(--well)}
@@ -1366,8 +1378,144 @@ function rgSettle(run, cleared){
   const record = rgRecord(run, cleared);
   const meta = rgMeta(), got = rgSettleMeta(meta, run, cleared);
   lsSet(RG_META, meta);
-  return {record, souls:got.souls, total:meta.souls, chars:got.chars, diffs:RG_ALL.filter(d=>!before.includes(d) && rgUnlocked(d, rgBest()))};
+  const rank = rgMode(run).max ? rkQueue(run, cleared) : null;
+  return {record, rank, souls:got.souls, total:meta.souls, chars:got.chars, diffs:RG_ALL.filter(d=>!before.includes(d) && rgUnlocked(d, rgBest()))};
 }
+/* ---- 無限回廊のオンラインランキング（Firebase の Cloud Firestore。サーバー側は ranking/README.md） ---- */
+// 送るのは名前・キャラ・到達階・日時（サーバーの時刻）・バージョンだけ。通信できなくてもゲームは止めない
+// 接続設定は公開してよい識別子（守っているのは ranking/firestore.rules）
+const RK_CONFIG = {
+  apiKey: "AIzaSyC_hucI17dfeRgpW7u4Gtq0pyemWUBKmWI",
+  authDomain: "taiman-senki.firebaseapp.com",
+  projectId: "taiman-senki",
+  storageBucket: "taiman-senki.firebasestorage.app",
+  messagingSenderId: "243084106210",
+  appId: "1:243084106210:web:0563a291feeedb6bab81bb"
+};
+const RK_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
+const RK_VER = '2026-10-20';                    // 記録に入れるゲームのバージョン（16文字以内）
+const RK_NAME = 'taiman-senki:rogue-name';      // 前回入れた名前
+const RK_PENDING = 'taiman-senki:rank-pending'; // まだ送れていない記録 {v:1, list:[{id, name, char, floor, tries}]}
+const RK_TOP = 20, RK_TIMEOUT = 15000, RK_TRIES = 5, RK_KEEP = 10;
+const RK_PUBLIC = 'ランキングは URL を知っている人なら誰でも見られます。本名ではなくニックネームにしてください';
+// ?rank-emulator で手元の Firebase エミュレーターにつなぐ（開発用。ranking/ の npm run emulators）
+const RK_EMU = /[?&]rank-emulator\b/.test(location.search);
+let rkFb = null;
+// SDK は使うときにだけ読む（ランキングを開いたとき・記録を送るとき）。失敗したら次に呼ばれたときに読み直す
+function rkFirebase(){
+  if(!rkFb) rkFb = (async()=>{
+    const [app, auth, fs] = await Promise.all(['app','auth','firestore'].map(n=>import(`${RK_SDK}firebase-${n}.js`)));
+    const a = app.initializeApp(RK_EMU ? {apiKey:'demo-key', projectId:'demo-taiman'} : RK_CONFIG, 'ranking');
+    const db = fs.getFirestore(a), au = auth.getAuth(a);
+    if(RK_EMU){ fs.connectFirestoreEmulator(db, '127.0.0.1', 8080); auth.connectAuthEmulator(au, 'http://127.0.0.1:9099', {disableWarnings:true}); }
+    return {auth, fs, db, au};
+  })().catch(e=>{ rkFb = null; throw e; });
+  return rkFb;
+}
+// 通信できないと Firestore は返事を待ち続けるので、一定時間で失敗とみなす
+const rkTimeout = p => Promise.race([p, new Promise((_, ng)=>setTimeout(()=>ng(Object.assign(new Error('timeout'), {code:'timeout'})), RK_TIMEOUT))]);
+
+// 名前：1〜12文字（length で数える。絵文字は2）、空白だけは不可。明らかに不適切な名前は簡単な禁止語で弾く（完全ではない）
+// 比べるときは全角半角・大文字小文字・カタカナひらがなをそろえ、空白・記号・長音を除く
+const RK_BAN_PART = ['ちんこ','ちんぽ','まんこ','せっくす','ふぇら','れいぷ','きちがい','ころすぞ','しねしね',
+  '死ね','氏ね','殺す','強姦','池沼','基地外','sex','fuck','shit','bitch','cunt','penis','pussy','porn','nigger','nigga','asshole'];
+const RK_BAN_WHOLE = ['しね','ころす','くず','かす','うんこ','うんち','ちんちん','おっぱい','がいじ','dick','kill','die','rape'];
+const rkNorm = s => s.normalize('NFKC').toLowerCase().replace(/[ァ-ヶ]/g, c=>String.fromCharCode(c.charCodeAt(0)-0x60)).replace(/[\s\p{P}\p{S}ー〜]/gu, '');
+const rkBad = name => { const n = rkNorm(name); return RK_BAN_WHOLE.includes(n) || RK_BAN_PART.some(w=>n.includes(w)); };
+// 戻り値：{name} か {error:理由}。前後の空白と制御文字・文字の向きを変える文字は取り除く
+function rkCheckName(raw){
+  const name = String(raw ?? '').replace(/[\p{Cc}‪-‮⁦-⁩]/gu, '').trim();
+  if(!/[^\s\p{Cf}]/u.test(name)) return {error:'名前を入れてください（空白だけは使えません）。'};
+  if(name.length>12) return {error:'名前は12文字までです（絵文字などは1つで2文字と数えます）。'};
+  if(rkBad(name)) return {error:'その名前は使えません。別の名前にしてください。'};
+  return {name};
+}
+const rkSavedName = () => { const n = lsGet(RK_NAME); return typeof n==='string' && !rkCheckName(n).error ? n : ''; };
+const rkNewId = () => { const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; return Array.from(crypto.getRandomValues(new Uint8Array(20)), x=>c[x%62]).join(''); };
+
+// 送る記録は結果が決まった時点（rgSettle）で端末に置き、そのあと送る。ドキュメント ID は冒険ごとに決めてあるので、
+// 再読み込みなどで送り直しても記録は1件にしかならない（同じ ID への2回目の書き込みはルールで弾かれる）
+function rkPending(){
+  const p = lsGet(RK_PENDING);
+  if(!p || p.v!==1 || !Array.isArray(p.list)) return [];
+  return p.list.filter(r=>r && typeof r==='object' && /^[A-Za-z0-9]{20}$/.test(r.id) && typeof r.name==='string' && rkCheckName(r.name).name===r.name
+    && isRosterId(r.char) && Number.isInteger(r.floor) && r.floor>=1 && r.floor<=RG_ENDLESS.max && rgCount(r.tries, RK_TRIES));
+}
+const rkSetPending = list => lsSet(RK_PENDING, list.length ? {v:1, list} : null);
+function rkQueue(run, cleared){
+  // 名前を入れる前に始めた回廊（この機能より前の保存）は、前回の名前があればそれで送る
+  const name = rkCheckName(run.rank?.name ?? rkSavedName()).name;
+  if(!name) return null;
+  const id = /^[A-Za-z0-9]{20}$/.test(run.rank?.id) ? run.rank.id : rkNewId();
+  const list = rkPending().filter(r=>r.id!==id);
+  list.push({id, name, char:run.charId, floor:rgReach(run, cleared), tries:0});
+  rkSetPending(list.slice(-RK_KEEP));
+  return {id, name};
+}
+async function rkSend(r){
+  const {auth, fs, db, au} = await rkFirebase();
+  await au.authStateReady();
+  if(!au.currentUser) await auth.signInAnonymously(au);
+  // scores の追加と limits/{匿名ID} の更新を1回の一括書き込みで（連続投稿よけ。ranking/README.md）
+  const ref = fs.doc(db, 'scores', r.id), b = fs.writeBatch(db);
+  b.set(ref, {name:r.name, char:r.char, floor:r.floor, at:fs.serverTimestamp(), ver:RK_VER});
+  b.set(fs.doc(db, 'limits', au.currentUser.uid), {last:fs.serverTimestamp()});
+  try{ await b.commit(); }
+  catch(e){
+    // 前に送れていた（返事を受け取る前に閉じた・時間切れにした）ときは、同じ ID の記録がもうある
+    if(e?.code==='permission-denied' && (await fs.getDoc(ref).catch(()=>null))?.exists()) return;
+    throw e;
+  }
+}
+// まだ送れていない記録を順に送る。戻り値：{記録のID: 'ok' か失敗の理由コード}。送れなかった記録は残し、RK_TRIES 回で諦める
+let rkBusy = null;
+function rkFlush(){
+  if(rkBusy) return rkBusy.then(()=>rkFlush());
+  rkBusy = (async()=>{
+    const out = {};
+    for(const r of rkPending()){
+      let ok = false;
+      try{ await rkTimeout(rkSend(r)); ok = true; out[r.id] = 'ok'; }
+      catch(e){ out[r.id] = e?.code || 'error'; }
+      rkSetPending(rkPending().flatMap(x=>x.id!==r.id ? [x] : ok || x.tries+1>=RK_TRIES ? [] : [{...x, tries:x.tries+1}]));
+    }
+    return out;
+  })().finally(()=>{ rkBusy = null; });
+  return rkBusy;
+}
+async function rkTop(){
+  const {fs, db} = await rkFirebase();
+  const snap = await rkTimeout(fs.getDocs(fs.query(fs.collection(db, 'scores'), fs.orderBy('floor', 'desc'), fs.orderBy('at', 'asc'), fs.limit(RK_TOP))));
+  return snap.docs.map(d=>d.data());
+}
+const rkWhy = code => code==='permission-denied' ? 'サーバーに受け付けてもらえませんでした'
+  : 'ネットにつながっていないか、ランキングのサーバーに接続できませんでした';
+
+// 上位20件。開いたときだけ読む。名前は必ず文字として表示する（textContent）
+function rgShowRanking(back){
+  const b = rgView(`${RG_ENDLESS.name}ランキング`, back);
+  b.append(el('p','muted',`到達階の高い順に上位${RK_TOP}件（同じ階なら先に達成した人が上）。${RK_PUBLIC}。`));
+  const box = el('div','screen'), st = el('p','muted','読み込み中…');
+  box.append(st); b.append(box);
+  rkFlush().catch(()=>{}).then(rkTop).then(rows=>{
+    if(!box.isConnected) return;
+    if(!rows.length){ st.textContent = 'まだ記録がありません。'; return; }
+    const t = el('table','rkTable'); t.id = 'rgRankTable';
+    const h = t.createTHead().insertRow();
+    ['順位','名前','キャラ','到達階','日付'].forEach(x=>h.append(el('th','',x)));
+    const tb = t.createTBody();
+    rows.forEach((r, i)=>{
+      const tr = tb.insertRow(), at = r.at?.toDate?.();
+      [i+1, String(r.name ?? ''), CHAR[r.char]?.name ?? '？', `${r.floor}F`, at ? `${at.getFullYear()}/${at.getMonth()+1}/${at.getDate()}` : '']
+        .forEach(v=>{ tr.insertCell().textContent = v; });
+    });
+    box.replaceChildren(t);
+  }).catch(e=>{
+    if(!box.isConnected) return;
+    st.className = 'err'; st.textContent = `ランキングを読み込めませんでした（${rkWhy(e?.code)}）。時間をおいてもう一度開いてください。`;
+  });
+}
+
 function refreshRogueMode(){
   const r = rgLoad();
   $('rogueDesc').textContent = r ? `続きから遊べます（${CHAR[r.charId].name} Lv${r.lv}・${r.floor+1}F／${RG_MODES[r.diff].name}）`
@@ -1437,8 +1585,13 @@ function rgShowDiffs(){
       if(saved) askConfirm('新しく始めますか？', '進行中の冒険は破棄されます。', '新しく始める', ()=>rgShowPick(RG_ENDLESS.id));
       else rgShowPick(RG_ENDLESS.id);
     }, top ? `最高到達 ${e[top.id]}F（${top.name}）` : 'まだ記録なし'));
-    b.append(ge);
+    const rk = el('button','btn','ランキング'); rk.type='button'; rk.id='rgRanking';
+    rk.addEventListener('click', ()=>rgShowRanking(rgShowDiffs));
+    const row = el('div','onRow'); row.append(rk, el('span','muted','全員共通の到達階ランキング（上位20件）'));
+    b.append(ge, row);
   }
+  // 前に送れなかったランキングの記録があれば、ここで送り直す（画面は止めない）
+  if(rkPending().length) rkFlush().catch(()=>{});
   const ul = el('ul','rules');
   ['HPは自然には回復しない',`HPが最大の${Math.round(RG_RESCUE*100)}%以下なら報酬に必ず回復が入る`,'戦闘中にやめても、その続きから再開','階を突破するたびに戦魂が手に入る（負けても到達分）'].forEach(t=>ul.append(el('li','',t)));
   b.append(ul, rgShopPanel(), rgCodePanel());
@@ -1545,8 +1698,30 @@ function rgShowPick(diffId){
     const e = rgEndlessBest().best, rec = CHARS.filter(c=>e[c.id]).map(c=>`${c.name} ${e[c.id]}F`);
     b.append(el('p','muted', `キャラ別の最高到達：${rec.length ? rec.join('・') : 'まだ記録なし'}`));
   }
+  // 無限回廊はランキングに載せる名前を入れてから始める（前回の名前を最初から入れておく）
+  let nameIn = null, nameErr = null;
+  if(d.max){
+    const p = el('div','panel rkNameBox');
+    const lb = el('label','', 'ランキングに載せる名前（1〜12文字）');
+    nameIn = el('input'); nameIn.type = 'text'; nameIn.id = 'rgName'; nameIn.maxLength = 12; nameIn.autocomplete = 'nickname';
+    nameIn.value = rkSavedName(); lb.htmlFor = 'rgName';
+    nameErr = el('p','err'); nameErr.id = 'rgNameErr'; nameErr.setAttribute('role','alert');
+    nameIn.addEventListener('input', ()=>{ nameErr.textContent = ''; });
+    p.append(lb, nameIn, el('p','muted', RK_PUBLIC + '。'), nameErr);
+    b.append(p);
+  }
   const ro = el('div','roster'); ro.id = 'rgRoster'; b.append(ro);
-  buildRoster(ro, id=>{ R = rgNewRunState(diffId, id, meta); rgShowMap(); }, id=>rgCharOpen(meta, id) ? null : RG_CHAR_UNLOCK[id].text);
+  buildRoster(ro, id=>{
+    let rank = null;
+    if(nameIn){
+      const c = rkCheckName(nameIn.value);
+      if(c.error){ nameErr.textContent = c.error; nameIn.focus(); nameIn.scrollIntoView({block:'center'}); return; }
+      lsSet(RK_NAME, c.name); rank = {name:c.name, id:rkNewId()};
+    }
+    R = rgNewRunState(diffId, id, meta);
+    if(rank) R.rank = rank;
+    rgShowMap();
+  }, id=>rgCharOpen(meta, id) ? null : RG_CHAR_UNLOCK[id].text);
 }
 
 function rgResume(){
@@ -1697,6 +1872,7 @@ function rgFinish(cleared){
   p.append(dl);
   s.diffs.forEach(d=>p.append(el('p','got', d.max ? `「${d.name}」が選べるようになった！` : `難易度「${d.name}」が選べるようになった！`)));
   s.chars.forEach(id=>p.append(el('p','got',`${CHAR[id].name}（${CHAR[id].role}）が冒険で使えるようになった！`)));
+  if(d.max) p.append(rkResultBox(s.rank));
   const row = el('div','onRow');
   const again = el('button','btn primary','もう一度挑戦'); again.type='button'; again.id='rgAgain';
   again.addEventListener('click', ()=>rgShowPick(run.diff));
@@ -1705,6 +1881,31 @@ function rgFinish(cleared){
   row.append(again, home); p.append(row);
   b.append(p);
   again.focus();
+}
+// 結果画面のランキング欄：送った結果を出す。送れなくてもゲームは続けられ、記録は端末に残して後で送り直す
+function rkResultBox(rank){
+  const box = el('div','rkResult'), st = el('p','muted'); st.id = 'rgRankStatus';
+  const view = el('button','btn','ランキングを見る'); view.type='button'; view.id='rgRankView';
+  view.addEventListener('click', ()=>rgShowRanking(rgShowDiffs));
+  const retry = el('button','btn','もう一度送る'); retry.type='button'; retry.id='rgRankRetry'; retry.hidden = true;
+  const row = el('div','onRow'); row.append(view, retry);
+  box.append(st, row);
+  const {id, name} = rank || {};
+  if(!id){ st.textContent = '名前が入っていない冒険のため、ランキングには送っていません。'; return box; }
+  const send = ()=>{
+    st.className = 'muted'; st.textContent = 'ランキングに送信中…'; retry.hidden = true;
+    rkFlush().catch(()=>({})).then(out=>{
+      if(!box.isConnected) return;
+      if(out[id]==='ok' || (!(id in out) && !rkPending().some(r=>r.id===id))){ st.className = 'ok'; st.textContent = `ランキングに送信しました（名前：${name}）`; return; }
+      const left = rkPending().some(r=>r.id===id);
+      st.className = 'err';
+      st.textContent = `ランキングに送れませんでした（${rkWhy(out[id])}）。` + (left ? '記録はこの端末に残してあり、次にローグライトの画面を開いたときに送り直します。' : '');
+      retry.hidden = !left;
+    });
+  };
+  retry.addEventListener('click', send);
+  send();
+  return box;
 }
 
 /* ================= オンライン（PeerJS：ブラウザどうしを直接つなぐ） ================= */
