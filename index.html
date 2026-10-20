@@ -55,8 +55,9 @@ h2{font-family:var(--font-pixel);font-weight:400;font-size:19px;margin:0}
 .subhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 
 /* modes */
-.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-@media (max-width:560px){.modes{grid-template-columns:minmax(0,1fr)}}
+.modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.modes.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:560px){.modes,.modes.three{grid-template-columns:minmax(0,1fr)}}
 .mode{all:unset;box-sizing:border-box;cursor:pointer;background:var(--panel);border-radius:6px;padding:16px 14px;display:flex;flex-direction:column;gap:4px;transition:background .15s, transform .15s}
 .mode:hover:not([disabled]){background:var(--panel-2);transform:translateY(-2px)}
 .mode:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -113,6 +114,7 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .fill.hp{background:var(--hp)}
 .fill.hp.low{background:var(--hp-low)}
 .fill.mp{background:var(--mp)}
+.fill.xp{background:var(--accent)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .chips{display:flex;flex-wrap:wrap;gap:4px;min-height:20px}
 .chip{font-size:11px;padding:1px 7px;border-radius:3px;background:var(--panel-2);color:var(--ink)}
@@ -175,6 +177,33 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .link{all:unset;cursor:pointer;color:var(--muted);font-size:12.5px;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
 .link:focus-visible{outline:2px solid var(--accent)}
 
+/* rogue */
+.rgStatus{display:grid;grid-template-columns:56px minmax(0,1fr);gap:12px;align-items:center}
+.rgStatus canvas{width:56px;height:56px;image-rendering:pixelated;background:var(--well);border-radius:4px}
+.rgStats{display:flex;flex-wrap:wrap;gap:0 12px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rgStats span{white-space:nowrap}
+.rgStats b{font-weight:400;color:var(--ink)}
+.mode .rec{font-size:12px;color:var(--accent)}
+.floors{display:flex;flex-direction:column;gap:6px}
+.floor{display:grid;grid-template-columns:2.6em minmax(0,1fr);gap:10px;align-items:center}
+.floor .fl{font-family:var(--font-pixel);color:var(--muted);text-align:right}
+.floor.cur .fl{color:var(--accent)}
+.node{all:unset;box-sizing:border-box;background:var(--panel);border-radius:6px;padding:7px 12px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.node .nn{font-family:var(--font-pixel);font-size:15px;display:flex;align-items:center;gap:8px}
+.node .nn::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--nc)}
+.node .nd{font-size:12px;color:var(--muted)}
+.node.battle{--nc:var(--ink)}
+.node.elite,.node.boss{--nc:var(--hp-low)}
+button.node{cursor:pointer;transition:background .12s}
+button.node:hover{background:var(--panel-2)}
+button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.floor.cur button.node{box-shadow:inset 0 0 0 1px var(--accent)}
+.node.done{background:var(--panel-2)}
+.node.future{opacity:.6}
+.rgEnd{align-items:center;text-align:center}
+.rgEnd h2{font-size:34px;color:var(--accent)}
+.rgEnd h2.lose{color:var(--muted)}
+
 @media (prefers-reduced-motion:reduce){
   .shake canvas,.lunge-r canvas,.lunge-l canvas{animation:none}
   .float{animation-duration:.01s}
@@ -195,6 +224,7 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
   <section id="home" class="screen">
     <p class="lead">ターン制のキャラクター対戦です。遊び方を選んでください。</p>
     <div class="modes">
+      <button class="mode" id="mode-rogue" type="button"><span class="mt">ローグライト</span><span class="md" id="rogueDesc">階層を進み、勝つたびに強くなる。最上階のボスを倒せば踏破。</span></button>
       <button class="mode" id="mode-cpu" type="button"><span class="mt">CPUと対戦</span><span class="md">ひとりで遊ぶ。相手はランダムに決まります。</span></button>
       <button class="mode" id="mode-local" type="button"><span class="mt">2人で対戦</span><span class="md">同じ端末で、交代しながら技を選びます。</span></button>
       <button class="mode" id="mode-online" type="button" disabled><span class="mt">オンライン対戦</span><span class="md" id="onlineDesc">接続を確認しています…</span></button>
@@ -244,6 +274,11 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
       <h3 class="h3" id="rosterHead">あなたのキャラ</h3>
       <div class="roster" id="onRoster"></div>
     </div>
+  </section>
+
+  <section id="rogue" class="screen" hidden>
+    <div class="subhead"><h2 id="rgTitle">ローグライト</h2><button class="link" id="rgBack" type="button">戻る</button></div>
+    <div id="rgBody" class="screen"></div>
   </section>
 
   <section id="battle" class="screen" hidden>
@@ -338,7 +373,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
 const sleep = ms => new Promise(r=>setTimeout(r, reduced ? Math.min(ms,250) : ms));
 function showScreen(id){
-  ['home','pick','online','battle'].forEach(s=>{ $(s).hidden = s!==id; });
+  ['home','pick','online','rogue','battle'].forEach(s=>{ $(s).hidden = s!==id; });
   if(id!=='battle') $('turnLabel').textContent='';
 }
 function drawSprite(cv, c, flip){
@@ -374,14 +409,21 @@ function markSelected(container, id){
 
 /* ================= 戦闘エンジン（端末に依存しない純粋な計算） ================= */
 // 状態は A / B の2陣営。結果は「演出ステップ」の列として返す: [文章, 効果, スナップショット]
-function newF(id){ const c=CHAR[id]; return {id, hp:c.hp, mp:Math.floor(c.mp/2), defUp:0, evade:0, atkUp:0, poison:0, stun:0, guard:0, counter:0}; }
-function initState(a,b){ return {turn:1, A:newF(a), B:newF(b)}; }
+// u：ローグライト用の能力定義。対戦用キャラ（CHAR）には含めず、戦闘状態の中に持たせる
+const unitOf = f => f.u || CHAR[f.id];
+function newF(id, u){
+  const c = u || CHAR[id];
+  const f = {id, hp:c.hp, mp:Math.floor(c.mp/2), defUp:0, evade:0, atkUp:0, poison:0, stun:0, guard:0, counter:0};
+  if(u) f.u = u;
+  return f;
+}
+function initState(a, b, ua, ub){ return {turn:1, A:newF(a, ua), B:newF(b, ub)}; }
 const pack = f => [f.hp,f.mp,f.defUp,f.evade,f.atkUp,f.poison,f.stun,f.guard,f.counter];
 const unpack = (id,a) => ({id, hp:a[0], mp:a[1], defUp:a[2], evade:a[3], atkUp:a[4], poison:a[5], stun:a[6], guard:a[7], counter:a[8]||0});
 
 function calcDamage(a, t, sk){
-  const atk = CHAR[a.id].atk * (a.atkUp>0 ? 1.3 : 1);
-  const def = CHAR[t.id].def * (t.defUp>0 ? 1.6 : 1);
+  const atk = unitOf(a).atk * (a.atkUp>0 ? 1.3 : 1);
+  const def = unitOf(t).def * (t.defUp>0 ? 1.6 : 1);
   let d = atk * sk.power * 50/(50+def);
   d *= 0.9 + Math.random()*0.2;
   const crit = Math.random() < (sk.crit ?? 0.05);
@@ -414,7 +456,7 @@ function act(st, s, sk, push){
       push(`${crit?'会心の一撃！ ':''}{${o}}に${dmg}のダメージ${t.guard&&!sk.sure?'（構えで軽減）':''}`, (crit?'c':'h')+o+dmg);
     }
     if(sk.drain && dealt>0 && a.hp>0){
-      const n = Math.min(CHAR[a.id].hp - a.hp, Math.round(dealt*sk.drain));
+      const n = Math.min(unitOf(a).hp - a.hp, Math.round(dealt*sk.drain));
       if(n>0){ a.hp += n; push(`{${s}}は${n}吸収した！`, 'r'+s+n); }
     }
     if(sk.recoil && dealt>0){
@@ -424,17 +466,17 @@ function act(st, s, sk, push){
     if(t.hp>0){
       if(sk.stun && Math.random()<sk.stun){ t.stun=1; push(`{${o}}はしびれた！`); }
       if(sk.poison){ t.poison=sk.poison; push(`{${o}}は毒におかされた！`); }
-      if(sk.steal){ const n=Math.min(sk.steal,t.mp); t.mp-=n; a.mp=Math.min(CHAR[a.id].mp, a.mp+n); push(`{${o}}からMPを${n}奪った！`); }
+      if(sk.steal){ const n=Math.min(sk.steal,t.mp); t.mp-=n; a.mp=Math.min(unitOf(a).mp, a.mp+n); push(`{${o}}からMPを${n}奪った！`); }
     }
   } else {
     push(`{${s}}の${sk.name}！`);
     if(sk.kind==='heal'){
-      const n = Math.min(CHAR[a.id].hp - a.hp, Math.round(CHAR[a.id].hp*sk.heal));
+      const n = Math.min(unitOf(a).hp - a.hp, Math.round(unitOf(a).hp*sk.heal));
       a.hp += n; push(`{${s}}のHPが${n}回復した！`, 'r'+s+n);
     } else if(sk.kind==='buff'){
       a[sk.buff] = sk.turns; push(`{${s}}の${BUFF_LABEL[sk.buff]}！（${sk.turns}ターン）`);
     } else if(sk.kind==='guard'){
-      a.guard = 1; a.mp = Math.min(CHAR[a.id].mp, a.mp + (sk.gain||0));
+      a.guard = 1; a.mp = Math.min(unitOf(a).mp, a.mp + (sk.gain||0));
       push(`{${s}}は身構えた！ MP+${sk.gain||0}`);
     } else if(sk.kind==='counter'){
       a.counter = sk.counter; push(`{${s}}は静かに刀に手をかけた…`);
@@ -445,12 +487,12 @@ function act(st, s, sk, push){
 function resolveTurn(st0, picks){
   const st = clone(st0), steps = [];
   const push = (text,fx) => steps.push([text, fx||'', [pack(st.A), pack(st.B)]]);
-  const sk = s => CHAR[st[s].id].skills[picks[s]];
+  const sk = s => unitOf(st[s]).skills[picks[s]];
   const order = ['A','B'].sort((x,y)=>{
     const pri = k => k==='guard' || k==='counter';
     const gx = pri(sk(x).kind), gy = pri(sk(y).kind);
     if(gx!==gy) return gx ? -1 : 1;
-    const sx = CHAR[st[x].id].spd, sy = CHAR[st[y].id].spd;
+    const sx = unitOf(st[x]).spd, sy = unitOf(st[y]).spd;
     if(sx!==sy) return sy - sx;
     return Math.random() - 0.5;
   });
@@ -459,7 +501,7 @@ function resolveTurn(st0, picks){
     act(st, s, sk(s), push);
   }
   for(const s of ['A','B']){
-    const f = st[s], c = CHAR[f.id];
+    const f = st[s], c = unitOf(f);
     f.guard = 0;
     if(f.counter){ f.counter = 0; if(f.hp>0) push(`{${s}}の見切りは空振りに終わった`); }
     if(f.hp<=0) continue;
@@ -481,7 +523,7 @@ function resolveTurn(st0, picks){
 }
 
 function cpuChoose(st, side){
-  const me = st[side], foe = st[other(side)], c = CHAR[me.id];
+  const me = st[side], foe = st[other(side)], c = unitOf(me);
   const usable = c.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost<=me.mp);
   const rate = me.hp/c.hp;
   const heal = usable.find(x=>x.s.kind==='heal');
@@ -514,13 +556,14 @@ let playChain = Promise.resolve();
 let matchOver = null;
 
 function whoLabel(side){
+  if(mode==='rogue') return side==='A' ? 'あなた' : RG_NODE[RB.node].foe;
   if(mode==='cpu') return side==='A' ? 'あなた' : 'CPU';
   if(mode==='local') return side==='A' ? '1P' : '2P';
   if(mode==='online' && ON.role==='spec') return side==='A' ? '1P' : '2P';
   return side===BOTTOM ? 'あなた' : '相手';
 }
 function dispName(side){
-  const n = CHAR[ST[side].id].name;
+  const n = unitOf(ST[side]).name;
   const mirror = ST.A.id===ST.B.id;
   return (mode==='local' || mirror || (mode==='online' && ON.role==='spec')) ? `${n}（${whoLabel(side)}）` : n;
 }
@@ -528,7 +571,7 @@ const fmt = t => t.replace(/\{([AB])\}/g, (_,s)=>dispName(s));
 const elOf = side => side===BOTTOM ? $('fp') : $('fe');
 
 function fighterHTML(side){
-  const c = CHAR[ST[side].id];
+  const c = unitOf(ST[side]);
   return `<div class="info">
       <div class="nameRow"><span class="name">${c.name}</span><span class="tag">${c.role}・${whoLabel(side)}</span></div>
       <div class="bar"><span class="lbl">HP</span><div class="track"><div class="fill hp"></div></div><span class="num hpn"></span></div>
@@ -543,18 +586,18 @@ function beginMatch(st, bottom){
   busy = false; myPick = null; localStage = 'A'; localPick = null; lines = []; matchOver = null;
   $('fp').innerHTML = fighterHTML(bottom);
   $('fe').innerHTML = fighterHTML(other(bottom));
-  drawSprite($('fp').querySelector('canvas'), CHAR[st[bottom].id], false);
-  drawSprite($('fe').querySelector('canvas'), CHAR[st[other(bottom)].id], true);
+  drawSprite($('fp').querySelector('canvas'), unitOf(st[bottom]), false);
+  drawSprite($('fe').querySelector('canvas'), unitOf(st[other(bottom)]), true);
   $('msg').innerHTML = '';
   $('result').hidden = true;
-  $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : 'ルームを出る') : 'モード選択に戻る';
+  $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : 'ルームを出る') : mode==='rogue' ? '中断してモード選択へ（続きから再開できます）' : 'モード選択に戻る';
   showScreen('battle');
   renderBars(); renderCommands(); renderPredBar();
 }
 
 function renderBars(){
   for(const side of ['A','B']){
-    const f = VIEW[side], c = CHAR[f.id], r = elOf(side);
+    const f = VIEW[side], c = unitOf(ST[side]), r = elOf(side);
     const hp = Math.max(0,f.hp), hpPct = hp/c.hp*100;
     const fill = r.querySelector('.fill.hp');
     fill.style.width = hpPct+'%'; fill.classList.toggle('low', hpPct<30);
@@ -570,7 +613,7 @@ function renderBars(){
     r.querySelector('.chips').innerHTML = chips.join('');
     r.querySelector('.stage').classList.toggle('ko', hp<=0);
   }
-  $('turnLabel').textContent = `TURN ${ST.turn}`;
+  $('turnLabel').textContent = (mode==='rogue' && R ? `${R.floor+1}F・` : '') + `TURN ${ST.turn}`;
 }
 
 function waitPanel(main, sub, btn){
@@ -602,10 +645,10 @@ function renderCommands(){
     head.textContent = '';
     const oppReady = onlineOppReady();
     cm.append(waitPanel(`<span class="dots">相手の選択を待っています</span>`,
-      `あなたの技：${CHAR[ST[BOTTOM].id].skills[myPick.idx].name}${oppReady?'｜相手は選択済み':''}`));
+      `あなたの技：${unitOf(ST[BOTTOM]).skills[myPick.idx].name}${oppReady?'｜相手は選択済み':''}`));
     return;
   }
-  const f = ST[side], c = CHAR[f.id];
+  const f = ST[side], c = unitOf(f);
   head.textContent = busy ? '' : (mode==='local' ? `${whoLabel(side)}（${c.name}）の技を選んでください` : `${c.name}の技を選んでください`);
   c.skills.forEach((s,i)=>{
     const b = document.createElement('button');
@@ -670,9 +713,11 @@ function queueResult(r){
 
 function onPickSkill(side, i){
   if(busy) return;
-  const f = ST[side], sk = CHAR[f.id].skills[i];
+  const f = ST[side], sk = unitOf(f).skills[i];
   if(!sk || sk.cost > f.mp) return;
-  if(mode==='cpu'){
+  if(mode==='rogue'){
+    rgTurn(i);
+  } else if(mode==='cpu'){
     queueResult(resolveTurn(ST, {A:i, B:cpuChoose(ST,'B')}));
   } else if(mode==='local'){
     if(side==='A'){ localPick = i; localStage = 'handoff'; renderCommands(); }
@@ -698,7 +743,8 @@ function setResult(title, cls, sub, btns, note){
   box.querySelector('button')?.focus();
 }
 function showResult(over){
-  const sub = `${CHAR[ST.A.id].name} vs ${CHAR[ST.B.id].name}｜${ST.turn}ターンで決着`;
+  if(mode==='rogue'){ rgBattleEnd(); return; }
+  const sub = `${unitOf(ST.A).name} vs ${unitOf(ST.B).name}｜${ST.turn}ターンで決着`;
   if(mode==='local'){
     const t = over==='draw' ? '引き分け' : over==='A' ? '1Pの勝利！' : '2Pの勝利！';
     const pair = [ST.A.id, ST.B.id];
@@ -710,7 +756,7 @@ function showResult(over){
   const pi = (mode==='online') ? ON.predInfo : null;
   const predNote = (pi && pi.mid===ON.mid && (pi.a+pi.b)>0) ? `観戦者の予想：${dispName('A')} ${pi.a}票 / ${dispName('B')} ${pi.b}票` : '';
   if(mode==='online' && ON.role==='spec'){
-    const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${CHAR[ST[over].id].name}の勝利！`;
+    const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${unitOf(ST[over]).name}の勝利！`;
     const hit = ON.myPred ? (ON.myPred===over ? '予想的中！' : '予想はずれ…') : '';
     setResult(hit || winner, hit==='予想はずれ…' ? 'small lose' : 'small', hit ? `${winner}｜${sub}` : sub, [
       {label:'観戦を続ける', primary:true, fn:()=>{ $('result').hidden = true; renderCommands(); }},
@@ -761,6 +807,416 @@ function startOffline(a, b){
   if(mode==='cpu') say(`CPUの${CHAR[b].name}（${CHAR[b].role}）が現れた！`);
   else say(`${dispName('A')} vs ${dispName('B')}、対戦開始！`);
   promptNext();
+}
+
+/* ================= ローグライト：データと計算 ================= */
+// 敵の能力は MONSTERS に、冒険中の自キャラは冒険データ（R.ch）に持つ。
+// どちらも対戦用キャラ（CHAR / CHARS）には登録せず、戦闘状態の各陣営の u として戦闘エンジンへ渡す。
+const MONSTERS = {
+  slime:{ name:'スライム', role:'魔物', exp:10, hp:70, mp:40, atk:22, def:10, spd:14,
+    colors:{g:'#5fb36a',l:'#a8e0a0',d:'#1d2a22',o:'#3a7a48'},
+    sprite:['............','............','............','.....gg.....','....gggg....','...glgggg...','..gldggdgg..','..ggdggdgg..','.gggggggggg.','.gggggggggg.','..oooooooo..','............'],
+    skills:[
+      {name:'体当たり', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'毒液', cost:12, kind:'attack', power:0.5, poison:3, desc:'3ターン毒状態に'},
+      {name:'ぷるぷる', cost:0, kind:'guard', gain:8, desc:'先制で防御、MP+8'},
+      {name:'のしかかり', cost:25, kind:'attack', power:1.6, desc:'威力大'}]},
+  bat:{ name:'コウモリ', role:'魔物', exp:10, hp:60, mp:40, atk:24, def:8, spd:36,
+    colors:{p:'#6a5a8e',r:'#e2725b',d:'#2a2236'},
+    sprite:['............','............','............','.p........p.','.pp..pp..pp.','.ppp.pp.ppp.','.pppppppppp.','..pprpprpp..','...pppppp...','....d..d....','............','............'],
+    skills:[
+      {name:'噛みつき', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'吸血', cost:8, kind:'attack', power:0.8, drain:0.5, desc:'与えたダメージの半分を回復'},
+      {name:'超音波', cost:15, kind:'attack', power:0.5, stun:0.35, desc:'35%でしびれ'},
+      {name:'羽ばたき', cost:15, kind:'buff', buff:'evade', turns:2, desc:'2ターン回避率50%'}]},
+  goblin:{ name:'ゴブリン', role:'魔物', exp:14, hp:90, mp:40, atk:27, def:14, spd:22,
+    colors:{k:'#7aa04a',d:'#2a2f1f',a:'#7a5a3a',w:'#9a7a52'},
+    sprite:['............','.k..kkkk..k.','.kkkkkkkkkk.','...kdkkdk...','...kkkkkk...','....kkkk..w.','..aaaaaaa.w.','.kaaaaaaakw.','...aaaaa..w.','...aa..aa...','...kk..kk...','..dd....dd..'],
+    skills:[
+      {name:'こん棒', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'乱れ打ち', cost:12, kind:'attack', power:0.45, hits:3, desc:'3回攻撃'},
+      {name:'雄叫び', cost:12, kind:'buff', buff:'atkUp', turns:3, desc:'3ターン攻撃UP'},
+      {name:'力まかせ', cost:25, kind:'attack', power:1.8, recoil:0.2, desc:'威力大。反動あり'}]},
+  skeleton:{ name:'骸骨兵', role:'魔物', exp:16, hp:100, mp:50, atk:28, def:20, spd:16,
+    colors:{b:'#e6e1d0',d:'#2a2f3a',w:'#9aa3ad'},
+    sprite:['...bbbbbb...','..bbbbbbbb..','..bddbbddb..','..bbbbbbbb..','...bdbdbb...','....bbbb..w.','..bbbbbbb.w.','.b.bdbdb.bw.','...bbbbb..w.','...b...b....','...b...b....','..bb...bb...'],
+    skills:[
+      {name:'骨の剣', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'構え', cost:0, kind:'guard', gain:10, desc:'先制で防御、MP+10'},
+      {name:'骨砕き', cost:15, kind:'attack', power:1.0, stun:0.25, desc:'25%でしびれ'},
+      {name:'呪いの剣', cost:30, kind:'attack', power:1.5, poison:2, desc:'威力大・2ターン毒'}]},
+  king:{ name:'ゴブリンキング', role:'ボス', exp:0, hp:210, mp:80, atk:32, def:22, spd:20,
+    colors:{k:'#7aa04a',d:'#2a2f1f',y:'#e8b84a',r:'#a33a3a',w:'#c9c2b0'},
+    sprite:['...y.yy.y...','...yyyyyy...','..kkkkkkkk..','..kdkkkkdk..','..kkkkkkkk..','...kkddkk.w.','.rrrrrrrrrw.','krrryyrrrkw.','k.rrrrrrr.w.','..rrr..rrr..','..kkk..kkk..','.ddd....ddd.'],
+    skills:[
+      {name:'王の鉄槌', cost:0, kind:'attack', power:1.0, desc:'基本の一撃'},
+      {name:'号令', cost:15, kind:'buff', buff:'atkUp', turns:3, desc:'3ターン攻撃UP'},
+      {name:'薙ぎ払い', cost:20, kind:'attack', power:0.7, hits:2, desc:'2回攻撃'},
+      {name:'王者の一撃', cost:35, kind:'attack', power:2.0, desc:'威力特大'}]}
+};
+const RG_NODE = {
+  battle:{name:'戦闘', foe:'敵'},
+  elite: {name:'強敵', foe:'強敵'},
+  boss:  {name:'ボス', foe:'ボス'}
+};
+// 難易度。ready:false はまだ遊べない（今後追加）
+const RG_DIFFS = [
+  {id:'easy', name:'やさしい', ready:true,
+   floors:['battle','battle','battle','elite','boss'],
+   pools:[['slime','bat'], ['goblin','bat','slime'], ['goblin','skeleton']],
+   enemyMul:0.5, eliteMul:0.85, bossMul:1.3, growth:0.08, feathers:1, ai:0.6, eliteExp:22,
+   desc:'全5階・1階1戦。序盤で育てて最上階のボスに挑む。復活の羽を1枚持って出発。'},
+  {id:'normal', name:'ふつう', ready:false, desc:'準備中'},
+  {id:'hard', name:'むずかしい', ready:false, desc:'準備中'}
+];
+const RG_DIFF = Object.fromEntries(RG_DIFFS.map(d=>[d.id,d]));
+// レベル：累計経験値の到達ライン
+const RG_LV_EXP = [0, 10, 25, 45, 70, 100, 135];
+// キャラ別の成長率（1レベルごとの上昇量）。冒険モード専用で、対戦モードの基本値（CHARS）は変えない
+const RG_GROWTH = {
+  kai:    {hp:10, atk:2, def:1, spd:1, mp:5},
+  mira:   {hp:8,  atk:1, def:2, spd:1, mp:5},   // 回復魔法があるぶん控えめ
+  gard:   {hp:14, atk:3, def:2, spd:1, mp:5},   // 火力不足を補う
+  rin:    {hp:14, atk:3, def:2, spd:1, mp:5},   // 打たれ弱さを補う
+  shizuku:{hp:12, atk:2, def:1, spd:1, mp:5},
+  doran:  {hp:12, atk:3, def:2, spd:1, mp:5}
+};
+const rgGrowth = run => RG_GROWTH[run.charId];
+// 撃破後の報酬の数値
+// healChance：HPが減っているとき（救済ライン超）に「回復 vs 強化」の2択になる確率。それ以外は強化2つ
+const RG_REWARD = {hp:65, stat:13, spd:10, mp:20, pow:0.6, cost:10, heal:0.45, heal2:0.3, heal2Up:10, healChance:0.55};
+const RG_RESCUE = 0.3;   // HPがこの割合以下なら、報酬の片方を必ず回復系にする
+const pickOne = a => a[Math.floor(Math.random()*a.length)];
+const shuffle = a => { a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
+
+function rgNewRunState(diffId, charId){
+  const ch = clone(CHAR[charId]); delete ch.id;
+  return {v:2, diff:diffId, charId, ch, lv:1, exp:0, hp:ch.hp, floor:0, feathers:RG_DIFF[diffId].feathers,
+    picks:[], stage:'map', battle:null, offer:null, wins:0, turns:0};
+}
+
+function rgEnemy(run){
+  const d = RG_DIFF[run.diff], f = run.floor, node = d.floors[f];
+  let e, mul;
+  if(node==='boss'){ e = clone(MONSTERS.king); mul = d.bossMul; }
+  else if(node==='elite'){
+    const base = CHARS.filter(c=>c.id!==run.charId);
+    e = clone(pickOne(base)); delete e.id;
+    e.name = `${e.name}の幻影`; e.exp = d.eliteExp; mul = d.eliteMul*(1+d.growth*f);
+  } else {
+    e = clone(MONSTERS[pickOne(d.pools[Math.min(f, d.pools.length-1)])]);
+    mul = d.enemyMul*(1+d.growth*f);
+  }
+  e.hp = Math.round(e.hp*mul); e.atk = Math.round(e.atk*mul); e.def = Math.round(e.def*(1+mul)/2);
+  return e;
+}
+
+// 戦闘開始時の状態。両陣営とも u（能力定義）を持ち、CHAR は参照されない
+function rgBattleState(run){
+  const st = initState('rg-you', 'rg-foe', clone(run.ch), rgEnemy(run));
+  st.A.hp = run.hp;
+  return st;
+}
+
+// 経験値を加え、上がったレベルの一覧を返す
+function rgGainExp(run, n){
+  run.exp += n;
+  const ups = [];
+  while(run.lv < RG_LV_EXP.length && run.exp >= RG_LV_EXP[run.lv]){
+    run.lv++;
+    const g = rgGrowth(run);
+    for(const k in g) run.ch[k] += g[k];
+    run.hp += g.hp;
+    ups.push(run.lv);
+  }
+  return ups;
+}
+
+// 撃破後の2択。heal:true が回復系
+function rgOffers(run){
+  const ch = run.ch, W = RG_REWARD;
+  const ups = [
+    {t:'hp',  v:W.hp,   name:'体力強化', desc:`最大HP+${W.hp}（同じだけ回復）`},
+    {t:'atk', v:W.stat, name:'攻撃強化', desc:`攻撃 ${ch.atk}→${ch.atk+W.stat}`},
+    {t:'def', v:W.stat, name:'防御強化', desc:`防御 ${ch.def}→${ch.def+W.stat}`},
+    {t:'spd', v:W.spd,  name:'速さ強化', desc:`速さ ${ch.spd}→${ch.spd+W.spd}`},
+    {t:'mp',  v:W.mp,   name:'魔力強化', desc:`最大MP ${ch.mp}→${ch.mp+W.mp}`}
+  ];
+  const x = pickOne(ch.skills.map((s,i)=>({s,i})).filter(x=>x.s.kind==='attack'));
+  ups.push({t:'pow', i:x.i, v:W.pow, name:`技強化：${x.s.name}`, desc:`威力+${Math.round(W.pow*100)}%`});
+  const costly = ch.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost>=10);
+  if(costly.length){
+    const y = pickOne(costly);
+    ups.push({t:'cost', i:y.i, v:W.cost, name:`省力化：${y.s.name}`, desc:`消費MP ${y.s.cost}→${Math.max(0,y.s.cost-W.cost)}`});
+  }
+  const heals = [
+    {t:'heal', v:W.heal, heal:true, name:'手当て', desc:`最大HPの${Math.round(W.heal*100)}%回復`},
+    {t:'heal', v:W.heal2, heal:true, name:'薬草と鍛錬', desc:`最大HP+${W.heal2Up}、最大HPの${Math.round(W.heal2*100)}%回復`, hpUp:W.heal2Up}
+  ];
+  const hurt = run.hp < ch.hp;
+  if(hurt && (run.hp <= ch.hp*RG_RESCUE || Math.random() < W.healChance)) return shuffle([pickOne(heals), pickOne(ups)]);
+  return shuffle(ups).slice(0,2);
+}
+
+function rgApply(run, o){
+  const ch = run.ch;
+  switch(o.t){
+    case 'hp': ch.hp += o.v; run.hp += o.v; break;
+    case 'atk': case 'def': case 'spd': ch[o.t] += o.v; break;
+    case 'mp': ch.mp += o.v; break;
+    case 'heal':
+      if(o.hpUp){ ch.hp += o.hpUp; run.hp += o.hpUp; }
+      run.hp = Math.min(ch.hp, run.hp + Math.round(ch.hp*o.v)); break;
+    case 'pow': { const s = ch.skills[o.i]; s.power = Math.round(s.power*(1+o.v)*100)/100; s.name += '+'; break; }
+    case 'cost': { const s = ch.skills[o.i]; s.cost = Math.max(0, s.cost-o.v); break; }
+  }
+  if(!o.heal) run.picks.push(o.name);
+}
+
+// 1ターンの結果を冒険データへ反映する（演出の前に確定させ、保存する）
+function rgCommitTurn(run, r){
+  const st = r.state;
+  if(!r.over){ run.battle.state = st; return {type:'cont'}; }
+  if(r.over!=='A' && run.feathers>0){
+    run.feathers--;
+    const ns = clone(st);
+    ns.A.hp = Math.ceil(run.ch.hp/2); ns.A.poison = 0; ns.A.stun = 0;
+    if(r.over==='B'){ ns.turn++; run.battle.state = ns; return {type:'revive', state:ns}; }
+    return rgCommitWin(run, ns, true);   // 相打ち：敵は倒れているので羽で立ち上がって勝利
+  }
+  if(r.over==='A') return rgCommitWin(run, st, false);
+  run.turns += st.turn; run.battle = null; run.stage = 'lost';
+  return {type:'lose', foe:st.B.u.name};
+}
+function rgCommitWin(run, st, revived){
+  const d = RG_DIFF[run.diff], boss = d.floors[run.floor]==='boss';
+  run.wins++; run.turns += st.turn;
+  run.hp = Math.max(1, st.A.hp);
+  const gain = st.B.u.exp || 0, ups = rgGainExp(run, gain);
+  run.battle = null;
+  if(boss){ run.stage = 'cleared'; return {type:'clear', foe:st.B.u.name, revived}; }
+  run.stage = 'reward'; run.offer = rgOffers(run);
+  return {type:'win', foe:st.B.u.name, gain, ups, turn:st.turn, revived};
+}
+function rgAfterReward(run, i){ rgApply(run, run.offer[i]); run.offer = null; run.floor++; run.stage = 'map'; }
+
+/* ================= ローグライト：画面 ================= */
+let R = null;              // 進行中の冒険（保存データと同じ形）
+let RB = {node:'battle', outcome:null};
+let rgBackFn = null;
+const RG_SAVE = 'taiman-senki:rogue-run', RG_BEST = 'taiman-senki:rogue-best';
+function lsGet(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
+function lsSet(k, v){ try{ if(v==null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function rgLoad(){
+  const r = lsGet(RG_SAVE);
+  if(!r || r.v!==2 || !RG_DIFF[r.diff]?.ready || !isRosterId(r.charId) || !r.ch) return null;
+  if(!['map','battle','reward'].includes(r.stage) || r.floor>=RG_DIFF[r.diff].floors.length) return null;
+  if(r.stage==='battle' && !(r.battle?.state?.A?.u && r.battle.state.B?.u)) return null;
+  if(r.stage==='reward' && !Array.isArray(r.offer)) return null;
+  return r;
+}
+// 冒険が終わったら保存を消す（再読み込みでやり直せないように、結果が決まった時点で即座に）
+function rgSave(){ lsSet(RG_SAVE, ['map','battle','reward'].includes(R.stage) ? R : null); refreshRogueMode(); }
+function rgRecord(run, cleared){
+  const best = lsGet(RG_BEST) || {};
+  const rec = best[run.diff] || {clears:0, bestFloor:0};
+  rec.bestFloor = Math.max(rec.bestFloor, cleared ? RG_DIFF[run.diff].floors.length : run.floor+1);
+  if(cleared) rec.clears++;
+  best[run.diff] = rec; lsSet(RG_BEST, best);
+  return rec;
+}
+function refreshRogueMode(){
+  const r = rgLoad();
+  $('rogueDesc').textContent = r ? `続きから遊べます（${CHAR[r.charId].name} Lv${r.lv}・${r.floor+1}F／${RG_DIFF[r.diff].name}）`
+    : '塔を登り、倒して育つ。最上階のボスを倒せば踏破。';
+}
+const rgD = () => RG_DIFF[R.diff];
+
+function rgView(title, back){
+  $('rgTitle').textContent = title;
+  rgBackFn = back; $('rgBack').hidden = !back;
+  $('result').hidden = true;
+  const b = $('rgBody'); b.innerHTML = '';
+  mode = 'rogue'; ST = null; showScreen('rogue'); window.scrollTo(0,0);
+  return b;
+}
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
+function choiceBtn(id, title, desc, fn, extra){
+  const b = el('button', 'mode'); b.type = 'button'; b.id = id;
+  b.append(el('span','mt',title), el('span','md',desc));
+  if(extra) b.append(el('span','rec',extra));
+  if(fn) b.addEventListener('click', fn); else b.disabled = true;
+  return b;
+}
+const goHome = () => { mode = null; ST = null; showScreen('home'); };
+
+function rgShowDiffs(){
+  const b = rgView('ローグライト', goHome);
+  b.append(el('p','lead','塔を1階ずつ登り、敵を倒して育てていくモード。経験値でレベルが上がり、勝つたびに2つの報酬から1つを選べます。HPは戦闘をまたいで持ち越し。最上階のボスを倒せば踏破です。'));
+  const saved = rgLoad();
+  if(saved){
+    const p = el('div','panel');
+    const where = saved.stage==='battle' ? '戦闘中' : saved.stage==='reward' ? '報酬選択中' : '';
+    p.append(el('div','', `進行中の冒険：${CHAR[saved.charId].name}（${CHAR[saved.charId].role}）Lv${saved.lv}・${saved.floor+1}F／${RG_DIFF[saved.diff].floors.length}F${where?'・'+where:''}・${RG_DIFF[saved.diff].name}`));
+    const row = el('div','onRow');
+    const c = el('button','btn primary','続きから'); c.type='button'; c.id='rgContinue';
+    c.addEventListener('click', ()=>{ R = saved; rgResume(); });
+    const x = el('button','btn','この冒険を破棄'); x.type='button'; x.id='rgDiscard';
+    x.addEventListener('click', ()=>{ if(confirm('進行中の冒険を破棄しますか？（記録には残りません）')){ lsSet(RG_SAVE,null); refreshRogueMode(); rgShowDiffs(); } });
+    row.append(c, x); p.append(row); b.append(p);
+  }
+  b.append(el('h3','h3','難易度'));
+  const g = el('div','modes three');
+  const best = lsGet(RG_BEST) || {};
+  RG_DIFFS.forEach(d=>{
+    const rec = best[d.id];
+    const recText = d.ready && rec ? `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F` : '';
+    g.append(choiceBtn('rgDiff-'+d.id, d.name, d.desc, d.ready ? ()=>{
+      if(saved && !confirm('進行中の冒険は破棄されます。新しく始めますか？')) return;
+      rgShowPick(d.id);
+    } : null, recText));
+  });
+  b.append(g);
+  const ul = el('ul','rules');
+  ['HPは自然には回復しない',`HPが最大の${Math.round(RG_RESCUE*100)}%以下なら報酬に必ず回復が入る`,'戦闘中にやめても、その続きから再開'].forEach(t=>ul.append(el('li','',t)));
+  b.append(ul);
+}
+
+function rgShowPick(diffId){
+  const b = rgView('使うキャラを選んでください', rgShowDiffs);
+  b.append(el('p','muted',`難易度：${RG_DIFF[diffId].name}`));
+  const ro = el('div','roster'); ro.id = 'rgRoster'; b.append(ro);
+  buildRoster(ro, id=>{ R = rgNewRunState(diffId, id); rgShowMap(); });
+}
+
+function rgResume(){
+  if(R.stage==='reward') rgShowReward();
+  else if(R.stage==='battle') rgBeginBattle(true);
+  else rgShowMap();
+}
+
+function rgStatusPanel(){
+  const ch = R.ch, p = el('div','panel rgStatus');
+  const cv = el('canvas'); cv.width = 12; cv.height = 12; drawSprite(cv, ch, false);
+  const info = el('div','info');
+  info.innerHTML = `<div class="nameRow"><span class="name"></span><span class="tag"></span></div>
+    <div class="bar"><span class="lbl">HP</span><div class="track"><div class="fill hp"></div></div><span class="num hpn"></span></div>
+    <div class="bar"><span class="lbl">EXP</span><div class="track"><div class="fill xp"></div></div><span class="num xpn"></span></div>
+    <div class="rgStats"></div><div class="chips"></div>`;
+  info.querySelector('.name').textContent = `${ch.name} Lv${R.lv}`;
+  info.querySelector('.tag').textContent = `${ch.role}・${rgD().name}`;
+  const pct = R.hp/ch.hp*100, f = info.querySelector('.fill.hp');
+  f.style.width = pct+'%'; f.classList.toggle('low', pct<=RG_RESCUE*100);
+  info.querySelector('.hpn').textContent = `${R.hp}/${ch.hp}`;
+  const lo = RG_LV_EXP[R.lv-1], hi = RG_LV_EXP[R.lv];
+  info.querySelector('.fill.xp').style.width = hi==null ? '100%' : ((R.exp-lo)/(hi-lo)*100)+'%';
+  info.querySelector('.xpn').textContent = hi==null ? 'MAX' : `あと${hi-R.exp}`;
+  info.querySelector('.rgStats').innerHTML = [['攻撃',ch.atk],['防御',ch.def],['速さ',ch.spd],['MP',ch.mp],['復活の羽',R.feathers]]
+    .map(([k,v])=>`<span>${k} <b>${v}</b></span>`).join('');
+  const chips = info.querySelector('.chips');
+  R.picks.forEach(n=>chips.append(el('span','chip',n)));
+  p.append(cv, info);
+  return p;
+}
+
+function rgShowMap(){
+  R.stage = 'map'; rgSave();
+  const fl = rgD().floors;
+  const b = rgView(`${R.floor+1}F／${fl.length}F`, goHome);
+  b.append(rgStatusPanel());
+  const list = el('div','floors');
+  fl.forEach((t, f)=>{
+    const cur = f===R.floor;
+    const row = el('div', 'floor'+(cur?' cur':''));
+    row.append(el('span','fl',`${f+1}F`));
+    const n = el(cur ? 'button' : 'div', `node ${t}` + (f<R.floor ? ' done' : f>R.floor ? ' future' : ''));
+    n.append(el('span','nn', RG_NODE[t].name + (f<R.floor ? '　突破' : '')));
+    if(cur){ n.append(el('span','nd','タップで戦闘開始')); n.type = 'button'; n.id = 'rgGo'; n.addEventListener('click', ()=>rgBeginBattle(false)); }
+    row.append(n); list.append(row);
+  });
+  b.append(list);
+  b.querySelector('#rgGo')?.focus();
+}
+
+function rgBeginBattle(resume){
+  if(!resume){ R.battle = {state:rgBattleState(R)}; R.stage = 'battle'; rgSave(); }
+  RB = {node:rgD().floors[R.floor], outcome:null};
+  playChain = Promise.resolve();
+  mode = 'rogue';
+  beginMatch(clone(R.battle.state), 'A');
+  const e = R.battle.state.B.u;
+  if(resume) say(`${e.name}との戦いの続きから`);
+  else say(RB.node==='boss' ? `塔の主、${e.name}が立ちはだかる！` : RB.node==='elite' ? `${e.name}（${e.role}）が現れた！` : `${e.name}が現れた！`);
+  promptNext();
+}
+
+function rgEnemyChoose(){
+  if(Math.random() < rgD().ai) return cpuChoose(ST, 'B');
+  const ok = ST.B.u.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost<=ST.B.mp);
+  return pickOne(ok).i;
+}
+
+// 技を選んだ瞬間に結果を確定・保存し、そのあと演出を流す
+function rgTurn(i){
+  const r = resolveTurn(ST, {A:i, B:rgEnemyChoose()});
+  const out = rgCommitTurn(R, r);
+  if(out.type==='lose') RB.record = rgRecord(R, false);
+  if(out.type==='clear') RB.record = rgRecord(R, true);
+  RB.outcome = out;
+  rgSave();
+  queueResult(r);
+}
+
+function rgBattleEnd(){
+  const o = RB.outcome;
+  if(o.type==='revive'){
+    setResult('復活の羽が舞った！', 'small', `HPが半分まで戻った（残りの羽 ${R.feathers}枚）`, [{label:'戦いを続ける', primary:true, fn:()=>{
+      ST = clone(o.state); VIEW = clone(ST); matchOver = null; busy = false; $('result').hidden = true;
+      renderBars(); say(`${dispName('A')}は立ち上がった！`); promptNext(); renderCommands();
+    }}]);
+  } else if(o.type==='win'){
+    const lines = [o.revived ? '復活の羽で立ち上がり、勝利をもぎ取った！' : `${o.turn}ターンで${o.foe}を撃破`, `経験値+${o.gain}`];
+    if(o.ups.length){
+      const g = rgGrowth(R), n = o.ups.length, lbl = {hp:'最大HP', atk:'攻撃', def:'防御', spd:'速さ', mp:'MP'};
+      lines.push(`レベルアップ！ Lv${R.lv}（${Object.keys(lbl).filter(k=>g[k]).map(k=>`${lbl[k]}+${g[k]*n}`).join(' ')}）`);
+    }
+    setResult('勝利！', '', lines.join('｜'), [{label:'報酬を選ぶ', primary:true, fn:rgShowReward}]);
+  } else if(o.type==='clear'){
+    setResult('踏破！', '', `${o.foe}を倒した！`, [{label:'結果を見る', primary:true, fn:()=>rgFinish(true)}]);
+  } else {
+    setResult('敗北…', 'lose', `${R.floor+1}Fで力尽きた｜${o.foe}に敗れた`, [{label:'結果を見る', primary:true, fn:()=>rgFinish(false)}]);
+  }
+}
+
+function rgShowReward(){
+  const b = rgView('報酬', null);
+  b.append(rgStatusPanel());
+  const rescue = R.hp <= R.ch.hp*RG_RESCUE;
+  b.append(el('p','cmdHead', rescue ? 'HPが危ない。回復も選べます' : 'どちらかひとつを選んでください'));
+  const g = el('div','modes');
+  R.offer.forEach((it,i)=>g.append(choiceBtn(`rgPick-${i}`, it.name, it.desc, ()=>{ rgAfterReward(R, i); rgShowMap(); }, it.heal ? '回復' : '強化')));
+  b.append(g);
+}
+
+function rgFinish(cleared){
+  const run = R, rec = RB.record || rgRecord(run, cleared); R = null;
+  const b = rgView('冒険の記録', null);
+  const p = el('div','panel rgEnd');
+  p.append(el('h2', cleared ? '' : 'lose', cleared ? '踏破！' : '冒険失敗'));
+  const dl = el('dl','lobbyStatus');
+  [['キャラ', `${CHAR[run.charId].name}（${CHAR[run.charId].role}）Lv${run.lv}`], ['難易度', RG_DIFF[run.diff].name],
+   ['到達', `${cleared ? RG_DIFF[run.diff].floors.length : run.floor+1}F／${RG_DIFF[run.diff].floors.length}F`], ['勝利', `${run.wins}回・合計${run.turns}ターン`],
+   ['強化', run.picks.length ? run.picks.join('、') : 'なし'], ['記録', `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F`]]
+    .forEach(([k,v])=>dl.append(el('dt','',k), el('dd','',v)));
+  p.append(dl);
+  const row = el('div','onRow');
+  const again = el('button','btn primary','もう一度挑戦'); again.type='button'; again.id='rgAgain';
+  again.addEventListener('click', ()=>rgShowPick(run.diff));
+  const home = el('button','btn','モード選択へ'); home.type='button'; home.id='rgHome';
+  home.addEventListener('click', goHome);
+  row.append(again, home); p.append(row);
+  b.append(p);
+  again.focus();
 }
 
 /* ================= オンライン（PeerJS：ブラウザどうしを直接つなぐ） ================= */
@@ -877,7 +1333,7 @@ function hostOnData(conn, d){
       sendTo(conn, picksMsg());
     }
   } else if(d.t==='char' && c.role==='player'){
-    ON.oppChar = CHAR[d.id] ? d.id : null;
+    ON.oppChar = isRosterId(d.id) ? d.id : null;
     hostSync(); maybeHostStart();
   } else if(d.t==='pick' && c.role==='player'){
     if(d.mid!==ON.mid) return;
@@ -932,7 +1388,7 @@ function hostTryResolve(){
   if(ON.played.has(key)) return;
   if(myPick.mid!==ON.mid || myPick.turn!==ST.turn || ON.oppPick.turn!==ST.turn) return;
   let gi = ON.oppPick.idx;
-  const sk = CHAR[ST.B.id].skills[gi];
+  const sk = unitOf(ST.B).skills[gi];
   if(!Number.isInteger(gi) || !sk || sk.cost > ST.B.mp) gi = 0;
   ON.played.add(key);
   if(ST.turn>=1) ON.predOpen = false;   // 予想は1ターン目の決着で締め切り
@@ -1017,7 +1473,7 @@ function onData(d){
       if(ON.role==='player'){ ON.oppReadyTurn = Number(d.turn); if(!busy && inBattle) renderCommands(); }
       break;
     case 'specState':
-      if(isSpec() && d.state && CHAR[d.state.A?.id] && CHAR[d.state.B?.id]) specJoinMidway(d);
+      if(isSpec() && d.state && rosterState(d.state)) specJoinMidway(d);
       break;
     case 'result': {
       const r = d.r;
@@ -1035,8 +1491,11 @@ function onData(d){
 }
 
 function validResult(r){
-  return r.state && CHAR[r.state.A?.id] && CHAR[r.state.B?.id] && Array.isArray(r.steps) && Number.isInteger(r.turn);
+  return r.state && rosterState(r.state) && Array.isArray(r.steps) && Number.isInteger(r.turn);
 }
+// 対戦で使えるのは対戦用キャラ（CHARS）だけ。ローグライトの敵などが混ざった状態は受け付けない
+const isRosterId = id => CHARS.some(c=>c.id===id);
+function rosterState(st){ return isRosterId(st.A?.id) && isRosterId(st.B?.id) && !st.A.u && !st.B.u; }
 
 function followerStart(r){
   mode = 'online';
@@ -1158,7 +1617,7 @@ function renderPredBar(){
 }
 function specPanel(){
   const d = document.createElement('div'); d.className = 'waitPanel';
-  const nameOf = s => `${whoLabel(s)} ${CHAR[ST[s].id].name}`;
+  const nameOf = s => `${whoLabel(s)} ${unitOf(ST[s]).name}`;
   const pi = ON.predInfo || {};
   if(!matchOver && pi.open && pi.mid===ON.mid && !ON.myPred){
     d.innerHTML = '<p>どちらが勝つと思う？</p><small>1ターン目が終わるまで予想できます</small>';
@@ -1200,12 +1659,15 @@ function leaveOnline(stayOnOnlineScreen){
 window.addEventListener('pagehide', ()=>{ if(isHost()) broadcast({t:'leave'}); else send({t:'leave'}); });
 
 /* ================= イベント ================= */
+$('mode-rogue').addEventListener('click', ()=>rgShowDiffs());
 $('mode-cpu').addEventListener('click', ()=>openPick('cpu'));
 $('mode-local').addEventListener('click', ()=>openPick('local'));
 $('mode-online').addEventListener('click', ()=>{
   mode = 'online'; resetOnlineScreens(); note('');
   showScreen('online');
 });
+$('rgBack').addEventListener('click', ()=>rgBackFn && rgBackFn());
+refreshRogueMode();
 $('pickBack').addEventListener('click', ()=>{ mode=null; showScreen('home'); });
 $('onBack').addEventListener('click', ()=>{ if(ON.peer) leaveOnline(); else { mode=null; showScreen('home'); } });
 $('onCreate').addEventListener('click', ()=>hostCreate());
