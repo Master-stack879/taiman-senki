@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// タイマン戦記：無限回廊オンラインランキング
+//
+// scores/{id}  … 1件の記録。誰でも読める。追加だけ（変更・削除は不可）。
+// limits/{uid} … 連続投稿よけ。端末（匿名ログイン）ごとの最終投稿時刻だけを持つ。
+//
+// 記録の追加は、scores の追加と limits/{uid} の更新を1回の一括書き込み（batch）で行う。
+// 管理画面（Firebase コンソール）からの削除にはこのルールはかからない。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 同じ端末から次に投稿できるまでの秒数
+    function cooldownSec() { return 60; }
+
+    function validScore(d) {
+      return d.keys().hasOnly(['name', 'char', 'floor', 'at', 'ver'])
+        && d.keys().hasAll(['name', 'char', 'floor', 'at', 'ver'])
+        // 名前：1〜12文字。空白だけは不可
+        && d.name is string
+        && d.name.size() >= 1 && d.name.size() <= 12
+        && !d.name.matches('^[\\s　]*$')
+        // キャラ：対戦用の6人
+        && d.char in ['kai', 'mira', 'gard', 'rin', 'shizuku', 'doran']
+        // 到達階：1〜200 の整数
+        && d.floor is int && d.floor >= 1 && d.floor <= 200
+        // 日時：サーバーの時刻（serverTimestamp）だけ
+        && d.at == request.time
+        // ゲームのバージョン：1〜16文字
+        && d.ver is string && d.ver.size() >= 1 && d.ver.size() <= 16;
+    }
+
+    match /scores/{id} {
+      allow get: if true;
+      // 一度に読めるのは100件まで（無料枠の読み取り回数を守る）
+      allow list: if request.query.limit <= 100;
+      allow create: if request.auth != null
+        && validScore(request.resource.data)
+        // 同じ一括書き込みで limits/{uid} を今の時刻に更新していること
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.last == request.time;
+      allow update, delete: if false;
+    }
+
+    match /limits/{uid} {
+      allow read: if false;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['last'])
+        && request.resource.data.last == request.time;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['last'])
+        && request.resource.data.last == request.time
+        && request.time >= resource.data.last + duration.value(cooldownSec(), 's');
+      allow delete: if false;
+    }
+  }
+}
