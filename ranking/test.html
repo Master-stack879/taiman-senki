@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ランキング接続テスト</title>
+<style>
+  :root { --bg:#f7f7f5; --fg:#222; --sub:#666; --line:#ccc; --ok:#1a7f37; --ng:#c62828; --box:#fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1b1d; --fg:#e8e8e8; --sub:#9a9a9a; --line:#444; --ok:#5fd17a; --ng:#ff7b72; --box:#26262a; }
+  }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:15px/1.6 system-ui, sans-serif; max-width:760px; margin-inline:auto; }
+  h1 { font-size:20px; } h2 { font-size:16px; margin-top:28px; }
+  section { background:var(--box); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin:12px 0; }
+  textarea, input, select, button { font:inherit; color:inherit; background:var(--bg);
+         border:1px solid var(--line); border-radius:6px; padding:6px 8px; box-sizing:border-box; }
+  textarea { width:100%; height:9em; font-family:ui-monospace, monospace; font-size:13px; }
+  button { cursor:pointer; background:var(--box); margin:4px 4px 0 0; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .row label { display:flex; flex-direction:column; font-size:13px; color:var(--sub); }
+  .sub { color:var(--sub); font-size:13px; }
+  pre { white-space:pre-wrap; word-break:break-all; font-size:13px; margin:0; }
+  .ok { color:var(--ok); } .ng { color:var(--ng); }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+</style>
+</head>
+<body>
+<h1>無限回廊ランキング 接続テスト</h1>
+<p class="sub">Firebase の本番プロジェクトに対して、記録の送信・上位の読み出し・ルールで弾かれるかを試すページです。ゲーム本体とは別物です。</p>
+
+<section>
+  <h2 style="margin-top:0">1. 接続設定</h2>
+  <p class="sub">Firebase コンソールの「プロジェクトの設定」→「マイアプリ」にある <code>firebaseConfig</code> を、<code>{</code> から <code>}</code> までそのまま貼り付けてください（このブラウザにだけ保存されます）。</p>
+  <textarea id="cfg" placeholder='{ apiKey: "...", authDomain: "...", projectId: "...", ... }'></textarea>
+  <button id="connect">接続する</button> <span id="status" class="sub">未接続</span>
+</section>
+
+<section>
+  <h2 style="margin-top:0">2. 記録を送る</h2>
+  <div class="row">
+    <label>名前<input id="name" value="テスト" size="14"></label>
+    <label>キャラ<select id="char">
+      <option>kai</option><option>mira</option><option>gard</option>
+      <option>rin</option><option>shizuku</option><option>doran</option>
+    </select></label>
+    <label>到達階<input id="floor" type="number" value="10" style="width:6em"></label>
+    <label>バージョン<input id="ver" value="test" size="8"></label>
+  </div>
+  <button id="send">送る</button>
+  <p class="sub">同じ端末からは60秒に1回まで。テストで送った記録は、あとで管理画面から消してください。</p>
+</section>
+
+<section>
+  <h2 style="margin-top:0">3. 上位を読み出す</h2>
+  <button id="top">上位20件を読む</button>
+  <div id="ranking"></div>
+</section>
+
+<section>
+  <h2 style="margin-top:0">4. 弾かれるはずのデータを試す</h2>
+  <p class="sub">どれも「弾かれた」になれば正常です。この確認では記録は1件も増えません。</p>
+  <button id="bad">試す</button>
+  <p class="sub">連続投稿の確認：正しい記録を2回続けて送り、2回目が弾かれるかを見ます（1件目は実際に登録されます）。</p>
+  <button id="twice">2回続けて送る</button>
+</section>
+
+<section>
+  <h2 style="margin-top:0">ログ</h2>
+  <pre id="log"></pre>
+</section>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
+import { getAuth, signInAnonymously, signOut, connectAuthEmulator } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import {
+  getFirestore, collection, doc, writeBatch, serverTimestamp, Timestamp,
+  query, orderBy, limit, getDocs, updateDoc, deleteDoc, connectFirestoreEmulator,
+} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+
+const $ = id => document.getElementById(id);
+const KEY = 'taiman-senki:ranking-test-config';
+let db = null, auth = null, uid = null;
+// test.html?emulator で、手元の Firebase エミュレーターにつなぐ（npm run emulators）
+const EMULATOR = new URLSearchParams(location.search).has('emulator');
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  $('log').prepend(line);
+}
+
+// firebaseConfig の貼り付け（JS のオブジェクト表記でも JSON でもよい）を読む
+function parseConfig(text) {
+  const cfg = {};
+  for (const k of ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId']) {
+    const m = text.match(new RegExp('["\']?' + k + '["\']?\\s*:\\s*["\']([^"\']+)["\']'));
+    if (m) cfg[k] = m[1];
+  }
+  if (!cfg.apiKey || !cfg.projectId) throw new Error('apiKey と projectId が見つかりません');
+  return cfg;
+}
+
+try { $('cfg').value = localStorage.getItem(KEY) || ''; } catch {}
+
+$('connect').onclick = async () => {
+  try {
+    const cfg = parseConfig($('cfg').value);
+    try { localStorage.setItem(KEY, $('cfg').value); } catch {}
+    const app = initializeApp(cfg, 'test-' + Date.now());
+    db = getFirestore(app);
+    auth = getAuth(app);
+    if (EMULATOR) {
+      connectFirestoreEmulator(db, '127.0.0.1', 8080);
+      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    }
+    const cred = await signInAnonymously(auth);
+    uid = cred.user.uid;
+    $('status').textContent = '接続済み（' + cfg.projectId + (EMULATOR ? '・エミュレーター' : '') + '）';
+    log('接続しました。匿名ログイン ID: ' + uid, 'ok');
+  } catch (e) {
+    $('status').textContent = '接続できません';
+    log('接続エラー: ' + (e.code || '') + ' ' + e.message, 'ng');
+  }
+};
+
+// ゲームから送るときと同じ形：scores の追加と limits/{uid} の更新を一括で
+function submit(rec) {
+  const b = writeBatch(db);
+  b.set(doc(collection(db, 'scores')), { at: serverTimestamp(), ...rec });
+  b.set(doc(db, 'limits', uid), { last: serverTimestamp() });
+  return b.commit();
+}
+
+function formRecord() {
+  return { name: $('name').value, char: $('char').value, floor: Number($('floor').value), ver: $('ver').value };
+}
+
+function needDb() {
+  if (!db) { log('先に「接続する」を押してください', 'ng'); return true; }
+  return false;
+}
+
+$('send').onclick = async () => {
+  if (needDb()) return;
+  const rec = formRecord();
+  try { await submit(rec); log('送信できました: ' + JSON.stringify(rec), 'ok'); }
+  catch (e) { log('弾かれました: ' + JSON.stringify(rec) + ' → ' + (e.code || e.message), 'ng'); }
+};
+
+$('top').onclick = async () => {
+  if (needDb()) return;
+  try {
+    const snap = await getDocs(query(collection(db, 'scores'), orderBy('floor', 'desc'), orderBy('at', 'asc'), limit(20)));
+    const t = document.createElement('table');
+    t.innerHTML = '<tr><th>順位</th><th>名前</th><th>キャラ</th><th>到達階</th><th>日時</th><th>版</th></tr>';
+    snap.docs.forEach((d, i) => {
+      const r = d.data(), tr = t.insertRow();
+      for (const v of [i + 1, r.name, r.char, r.floor, r.at?.toDate().toLocaleString('ja-JP'), r.ver]) {
+        tr.insertCell().textContent = v ?? '';
+      }
+    });
+    $('ranking').replaceChildren(t);
+    log('上位を読み出しました（' + snap.size + '件）', 'ok');
+  } catch (e) {
+    // 複合インデックスが無いときは、作成用のリンクがエラーに入っている
+    const link = (e.message.match(/https:\/\/\S+/) || [])[0];
+    $('ranking').replaceChildren();
+    if (link) {
+      const a = document.createElement('a');
+      a.href = link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'インデックスを作成する（Firebase コンソールが開きます）';
+      $('ranking').append(a);
+    }
+    log('読み出しエラー: ' + (e.code || '') + ' ' + e.message, 'ng');
+  }
+};
+
+$('bad').onclick = async () => {
+  if (needDb()) return;
+  // 連続投稿よけで弾かれたのと区別するため、まだ投稿していない新しい匿名 ID でやり直す
+  await signOut(auth);
+  uid = (await signInAnonymously(auth)).user.uid;
+  log('新しい匿名 ID で確認します: ' + uid);
+  const base = { name: 'テスト', char: 'kai', floor: 10, ver: 'test' };
+  const cases = [
+    ['名前が空', { name: '' }],
+    ['名前が13文字', { name: 'あいうえおかきくけこさしす' }],
+    ['名前が空白だけ', { name: '   ' }],
+    ['対戦用でないキャラ', { char: 'slime' }],
+    ['到達階0', { floor: 0 }],
+    ['到達階201', { floor: 201 }],
+    ['到達階が小数', { floor: 3.5 }],
+    ['余計な項目', { hp: 999 }],
+    ['日時をごまかす', { at: Timestamp.fromDate(new Date('2000-01-01')) }],
+  ];
+  let pass = 0;
+  for (const [label, patch] of cases) {
+    try { await submit({ ...base, ...patch }); log('× 通ってしまった: ' + label, 'ng'); }
+    catch (e) { pass++; log('○ 弾かれた: ' + label + '（' + (e.code || e.message) + '）', 'ok'); }
+  }
+  // 変更・削除（既存の記録を1件取って試す）
+  try {
+    const snap = await getDocs(query(collection(db, 'scores'), limit(1)));
+    if (snap.empty) log('（記録が無いので変更・削除の確認は省略）');
+    else {
+      const ref = snap.docs[0].ref;
+      try { await updateDoc(ref, { floor: 200 }); log('× 変更できてしまった', 'ng'); }
+      catch (e) { pass++; log('○ 弾かれた: 記録の変更（' + e.code + '）', 'ok'); }
+      try { await deleteDoc(ref); log('× 削除できてしまった', 'ng'); }
+      catch (e) { pass++; log('○ 弾かれた: 記録の削除（' + e.code + '）', 'ok'); }
+    }
+  } catch (e) { log('読み出しエラー: ' + e.message, 'ng'); }
+  log('弾かれた数: ' + pass);
+};
+
+$('twice').onclick = async () => {
+  if (needDb()) return;
+  const rec = formRecord();
+  try { await submit(rec); log('1回目: 送信できました', 'ok'); }
+  catch (e) { log('1回目も弾かれました（前回の送信から60秒経っていないかも）: ' + (e.code || e.message), 'ng'); return; }
+  try { await submit(rec); log('× 2回目も通ってしまった', 'ng'); }
+  catch (e) { log('○ 2回目は弾かれた（' + (e.code || e.message) + '）', 'ok'); }
+};
+</script>
+</body>
+</html>
