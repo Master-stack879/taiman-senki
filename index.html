@@ -742,6 +742,13 @@ function setResult(title, cls, sub, btns, note){
   $('result').hidden = false;
   box.querySelector('button')?.focus();
 }
+// ゲーム内の確認画面（ブラウザ標準の confirm() の代わり）。最初は「やめる」にフォーカスを置く
+function askConfirm(title, sub, okLabel, onOk){
+  setResult(title, 'small', sub, [
+    {label:okLabel, fn:()=>{ $('result').hidden = true; onOk(); }},
+    {label:'やめる', primary:true, fn:()=>{ $('result').hidden = true; }}]);
+  $('resBtn1').focus();
+}
 function showResult(over){
   if(mode==='rogue'){ rgBattleEnd(); return; }
   const sub = `${unitOf(ST.A).name} vs ${unitOf(ST.B).name}｜${ST.turn}ターンで決着`;
@@ -859,32 +866,49 @@ const RG_NODE = {
   elite: {name:'強敵', foe:'強敵'},
   boss:  {name:'ボス', foe:'ボス'}
 };
-// 難易度。ready:false はまだ遊べない（今後追加）
+// 難易度。unlock：この難易度を踏破すると選べるようになる
+// ai：敵が考えて技を選ぶ確率（それ以外はランダム）。smart：考えるときに賢い選び方（rgSmartChoose）をする
+// eliteUp：4階の幻影の最大技の威力上昇。foeSkills：敵ごとの技の差し替え（{敵のキー:{技の番号:技}}）
+// reward：報酬の質（RG_REWARD への上書き）
 const RG_DIFFS = [
   {id:'easy', name:'やさしい', ready:true,
    floors:['battle','battle','battle','elite','boss'],
    pools:[['slime','bat'], ['goblin','bat','slime'], ['goblin','skeleton']],
-   enemyMul:0.5, eliteMul:0.85, bossMul:1.3, growth:0.08, feathers:1, ai:0.6, eliteExp:22,
+   enemyMul:0.36, eliteMul:0.89, bossMul:1.12, growth:0.14, feathers:1, ai:0.6, eliteExp:22,
    desc:'全5階・1階1戦。序盤で育てて最上階のボスに挑む。復活の羽を1枚持って出発。'},
-  {id:'normal', name:'ふつう', ready:false, desc:'準備中'},
-  {id:'hard', name:'むずかしい', ready:false, desc:'準備中'}
+  {id:'normal', name:'ふつう', ready:true, unlock:'easy',
+   floors:['battle','battle','battle','elite','boss'],
+   pools:[['slime','bat','goblin'], ['goblin','skeleton','bat'], ['skeleton','goblin']],
+   enemyMul:0.4, eliteMul:1.1, bossMul:1.08, growth:0.1, feathers:1, ai:0.9, eliteExp:22, eliteUp:0.2,
+   foeSkills:{king:{2:{name:'威圧の薙ぎ払い', cost:20, kind:'attack', power:0.7, hits:2, stun:0.2, desc:'2回攻撃・20%でしびれ'}}},
+   reward:{healChance:0.45},
+   desc:'敵がよく考えて戦い、4階の幻影は得意技を磨いている。ボスの薙ぎ払いはしびれを呼ぶ。'},
+  {id:'hard', name:'むずかしい', ready:true, unlock:'normal',
+   floors:['battle','battle','battle','elite','boss'],
+   pools:[['bat','goblin'], ['skeleton','goblin'], ['skeleton','goblin']],
+   enemyMul:0.44, eliteMul:0.95, bossMul:1.27, growth:0.16, feathers:1, ai:0.82, smart:true, eliteExp:22, eliteUp:0.29,
+   foeSkills:{king:{1:{name:'王家の秘薬', cost:30, kind:'heal', heal:0.3, desc:'最大HPの30%回復'}}},
+   reward:{healChance:0.6},   // 強化2つの報酬が出にくく、回復か強化かを選ぶ場面が増える
+   desc:'敵は隙を見逃さずとどめを狙い、ボスは秘薬で傷を癒やす。強化を2つ並べた報酬は出にくい。'}
 ];
 const RG_DIFF = Object.fromEntries(RG_DIFFS.map(d=>[d.id,d]));
 // レベル：累計経験値の到達ライン
 const RG_LV_EXP = [0, 10, 25, 45, 70, 100, 135];
 // キャラ別の成長率（1レベルごとの上昇量）。冒険モード専用で、対戦モードの基本値（CHARS）は変えない
 const RG_GROWTH = {
-  kai:    {hp:10, atk:2, def:1, spd:1, mp:5},
-  mira:   {hp:8,  atk:1, def:2, spd:1, mp:5},   // 回復魔法があるぶん控えめ
-  gard:   {hp:14, atk:3, def:2, spd:1, mp:5},   // 火力不足を補う
-  rin:    {hp:14, atk:3, def:2, spd:1, mp:5},   // 打たれ弱さを補う
-  shizuku:{hp:12, atk:2, def:1, spd:1, mp:5},
-  doran:  {hp:12, atk:3, def:2, spd:1, mp:5}
+  kai:    {hp:14, atk:2, def:2, spd:1, mp:5},
+  mira:   {hp:10, atk:1, def:3, spd:1, mp:5},   // 回復魔法があるぶん控えめ
+  gard:   {hp:19, atk:3, def:3, spd:1, mp:5},   // 火力不足を補う
+  rin:    {hp:14, atk:3, def:3, spd:1, mp:5},   // 打たれ弱さを補う（速さで有利なぶん控えめ）
+  shizuku:{hp:14, atk:2, def:2, spd:1, mp:5},
+  doran:  {hp:17, atk:3, def:3, spd:1, mp:5}
 };
 const rgGrowth = run => RG_GROWTH[run.charId];
 // 撃破後の報酬の数値
 // healChance：HPが減っているとき（救済ライン超）に「回復 vs 強化」の2択になる確率。それ以外は強化2つ
-const RG_REWARD = {hp:65, stat:13, spd:10, mp:20, pow:0.6, cost:10, heal:0.45, heal2:0.3, heal2Up:10, healChance:0.55};
+// 基準：報酬1回分 ≒ レベルアップ約2回分（回復系はHPの割合なので別扱い）
+const RG_REWARD = {hp:40, stat:8, spd:6, mp:20, pow:0.4, cost:8, heal:0.45, heal2:0.3, healChance:0.55};
+const rgReward = run => ({...RG_REWARD, ...RG_DIFF[run.diff].reward});
 const RG_RESCUE = 0.3;   // HPがこの割合以下なら、報酬の片方を必ず回復系にする
 const pickOne = a => a[Math.floor(Math.random()*a.length)];
 const shuffle = a => { a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
@@ -897,18 +921,44 @@ function rgNewRunState(diffId, charId){
 
 function rgEnemy(run){
   const d = RG_DIFF[run.diff], f = run.floor, node = d.floors[f];
-  let e, mul;
-  if(node==='boss'){ e = clone(MONSTERS.king); mul = d.bossMul; }
+  let e, mul, key;
+  if(node==='boss'){ key = 'king'; e = clone(MONSTERS.king); mul = d.bossMul; }
   else if(node==='elite'){
     const base = CHARS.filter(c=>c.id!==run.charId);
-    e = clone(pickOne(base)); delete e.id;
+    e = clone(pickOne(base)); key = e.id; delete e.id;
     e.name = `${e.name}の幻影`; e.exp = d.eliteExp; mul = d.eliteMul*(1+d.growth*f);
   } else {
-    e = clone(MONSTERS[pickOne(d.pools[Math.min(f, d.pools.length-1)])]);
+    key = pickOne(d.pools[Math.min(f, d.pools.length-1)]); e = clone(MONSTERS[key]);
     mul = d.enemyMul*(1+d.growth*f);
   }
   e.hp = Math.round(e.hp*mul); e.atk = Math.round(e.atk*mul); e.def = Math.round(e.def*(1+mul)/2);
+  const swap = d.foeSkills?.[key] || {};
+  for(const i in swap) e.skills[i] = clone(swap[i]);
+  if(node==='elite' && d.eliteUp){
+    const s = e.skills.filter(s=>s.kind==='attack').sort((a,b)=>b.power*(b.hits||1)-a.power*(a.hits||1))[0];
+    s.power = Math.round(s.power*(1+d.eliteUp)*100)/100; s.name += '+';
+  }
   return e;
+}
+
+// 敵の技選び。難易度の ai の確率で考えて選び、それ以外はランダム
+function rgFoeChoose(st, run){
+  const d = RG_DIFF[run.diff];
+  if(Math.random() < d.ai) return d.smart ? rgSmartChoose(st, 'B') : cpuChoose(st, 'B');
+  return pickOne(st.B.u.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost<=st.B.mp)).i;
+}
+// 賢い選び方：確実に倒せるならとどめを刺し、HPが減ったら必ず回復する。それ以外は cpuChoose
+function rgSmartChoose(st, side){
+  const me = st[side], foe = st[other(side)], c = unitOf(me), fc = unitOf(foe);
+  const usable = c.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost<=me.mp);
+  const low = s => c.atk*(me.atkUp>0 ? 1.3 : 1)*s.power*(s.hits||1)*50/(50+fc.def*(foe.defUp>0 ? 1.6 : 1))*0.9;
+  if(!(foe.evade>0)){
+    const kill = usable.filter(x=>x.s.kind==='attack' && !(x.s.recoil && me.hp<=low(x.s)*x.s.recoil) && low(x.s)>=foe.hp).sort((a,b)=>a.s.cost-b.s.cost)[0];
+    if(kill) return kill.i;
+  }
+  const heal = usable.find(x=>x.s.kind==='heal');
+  if(heal && me.hp/c.hp<0.45) return heal.i;
+  return cpuChoose(st, side);
 }
 
 // 戦闘開始時の状態。両陣営とも u（能力定義）を持ち、CHAR は参照されない
@@ -934,7 +984,7 @@ function rgGainExp(run, n){
 
 // 撃破後の2択。heal:true が回復系
 function rgOffers(run){
-  const ch = run.ch, W = RG_REWARD;
+  const ch = run.ch, W = rgReward(run);
   const ups = [
     {t:'hp',  v:W.hp,   name:'体力強化', desc:`最大HP+${W.hp}（同じだけ回復）`},
     {t:'atk', v:W.stat, name:'攻撃強化', desc:`攻撃 ${ch.atk}→${ch.atk+W.stat}`},
@@ -951,7 +1001,7 @@ function rgOffers(run){
   }
   const heals = [
     {t:'heal', v:W.heal, heal:true, name:'手当て', desc:`最大HPの${Math.round(W.heal*100)}%回復`},
-    {t:'heal', v:W.heal2, heal:true, name:'薬草と鍛錬', desc:`最大HP+${W.heal2Up}、最大HPの${Math.round(W.heal2*100)}%回復`, hpUp:W.heal2Up}
+    {t:'heal', v:W.heal2, heal:true, name:'薬草', desc:`最大HPの${Math.round(W.heal2*100)}%回復`}
   ];
   const hurt = run.hp < ch.hp;
   if(hurt && (run.hp <= ch.hp*RG_RESCUE || Math.random() < W.healChance)) return shuffle([pickOne(heals), pickOne(ups)]);
@@ -965,7 +1015,6 @@ function rgApply(run, o){
     case 'atk': case 'def': case 'spd': ch[o.t] += o.v; break;
     case 'mp': ch.mp += o.v; break;
     case 'heal':
-      if(o.hpUp){ ch.hp += o.hpUp; run.hp += o.hpUp; }
       run.hp = Math.min(ch.hp, run.hp + Math.round(ch.hp*o.v)); break;
     case 'pow': { const s = ch.skills[o.i]; s.power = Math.round(s.power*(1+o.v)*100)/100; s.name += '+'; break; }
     case 'cost': { const s = ch.skills[o.i]; s.cost = Math.max(0, s.cost-o.v); break; }
@@ -1017,8 +1066,17 @@ function rgLoad(){
 }
 // 冒険が終わったら保存を消す（再読み込みでやり直せないように、結果が決まった時点で即座に）
 function rgSave(){ lsSet(RG_SAVE, ['map','battle','reward'].includes(R.stage) ? R : null); refreshRogueMode(); }
+// 記録。壊れた値が入っていても止まらないよう、形を確かめてから使う
+function rgBest(){
+  const b = lsGet(RG_BEST), out = {};
+  if(b && typeof b==='object') for(const d of RG_DIFFS){
+    const r = b[d.id];
+    if(r && Number.isFinite(r.clears) && Number.isFinite(r.bestFloor)) out[d.id] = {clears:r.clears, bestFloor:r.bestFloor};
+  }
+  return out;
+}
 function rgRecord(run, cleared){
-  const best = lsGet(RG_BEST) || {};
+  const best = rgBest();
   const rec = best[run.diff] || {clears:0, bestFloor:0};
   rec.bestFloor = Math.max(rec.bestFloor, cleared ? RG_DIFF[run.diff].floors.length : run.floor+1);
   if(cleared) rec.clears++;
@@ -1031,6 +1089,8 @@ function refreshRogueMode(){
     : '塔を登り、倒して育つ。最上階のボスを倒せば踏破。';
 }
 const rgD = () => RG_DIFF[R.diff];
+// やさしいを踏破するとふつう、ふつうを踏破するとむずかしいが選べる
+const rgUnlocked = (d, best) => d.ready && (!d.unlock || (best[d.unlock]?.clears || 0) > 0);
 
 function rgView(title, back){
   $('rgTitle').textContent = title;
@@ -1062,18 +1122,18 @@ function rgShowDiffs(){
     const c = el('button','btn primary','続きから'); c.type='button'; c.id='rgContinue';
     c.addEventListener('click', ()=>{ R = saved; rgResume(); });
     const x = el('button','btn','この冒険を破棄'); x.type='button'; x.id='rgDiscard';
-    x.addEventListener('click', ()=>{ if(confirm('進行中の冒険を破棄しますか？（記録には残りません）')){ lsSet(RG_SAVE,null); refreshRogueMode(); rgShowDiffs(); } });
+    x.addEventListener('click', ()=>askConfirm('冒険を破棄しますか？', '進行中の冒険は記録に残らず消えます。', '破棄する', ()=>{ lsSet(RG_SAVE,null); refreshRogueMode(); rgShowDiffs(); }));
     row.append(c, x); p.append(row); b.append(p);
   }
   b.append(el('h3','h3','難易度'));
   const g = el('div','modes three');
-  const best = lsGet(RG_BEST) || {};
+  const best = rgBest();
   RG_DIFFS.forEach(d=>{
-    const rec = best[d.id];
-    const recText = d.ready && rec ? `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F` : '';
-    g.append(choiceBtn('rgDiff-'+d.id, d.name, d.desc, d.ready ? ()=>{
-      if(saved && !confirm('進行中の冒険は破棄されます。新しく始めますか？')) return;
-      rgShowPick(d.id);
+    const rec = best[d.id], open = rgUnlocked(d, best);
+    const recText = !open ? `「${RG_DIFF[d.unlock].name}」を踏破すると解放` : rec ? `踏破 ${rec.clears}回・最高到達 ${rec.bestFloor}F` : '';
+    g.append(choiceBtn('rgDiff-'+d.id, d.name, open ? d.desc : '？？？', open ? ()=>{
+      if(saved) askConfirm('新しく始めますか？', '進行中の冒険は破棄されます。', '新しく始める', ()=>rgShowPick(d.id));
+      else rgShowPick(d.id);
     } : null, recText));
   });
   b.append(g);
@@ -1150,15 +1210,9 @@ function rgBeginBattle(resume){
   promptNext();
 }
 
-function rgEnemyChoose(){
-  if(Math.random() < rgD().ai) return cpuChoose(ST, 'B');
-  const ok = ST.B.u.skills.map((s,i)=>({s,i})).filter(x=>x.s.cost<=ST.B.mp);
-  return pickOne(ok).i;
-}
-
 // 技を選んだ瞬間に結果を確定・保存し、そのあと演出を流す
 function rgTurn(i){
-  const r = resolveTurn(ST, {A:i, B:rgEnemyChoose()});
+  const r = resolveTurn(ST, {A:i, B:rgFoeChoose(ST, R)});
   const out = rgCommitTurn(R, r);
   if(out.type==='lose') RB.record = rgRecord(R, false);
   if(out.type==='clear') RB.record = rgRecord(R, true);
