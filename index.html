@@ -936,22 +936,28 @@ const shuffle = a => { a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Mat
 const RG_SOUL = {floor:3, boss:10};
 // 永続強化。prices の数が段階数（上限）。効き目は報酬（RG_REWARD）との比率で決まるので、報酬を変えたらここも見直す
 const RG_UPGRADES = [
-  {id:'hp', name:'初期HP+15', prices:[20,40,60], hp:15, desc:'冒険の開始時の最大HPが上がる'},
-  {id:'mp', name:'初期MP+10', prices:[30,60], mp:10, desc:'冒険の開始時の最大MPが上がる'},
+  {id:'hp', name:'初期HP+5', prices:[20,40,60], hp:5, desc:'冒険の開始時の最大HPが上がる'},
+  {id:'mp', name:'初期MP+5', prices:[30,60], mp:5, desc:'冒険の開始時の最大MPが上がる'},
   {id:'reroll', name:'報酬の引き直し', prices:[80], desc:'1回の冒険で1度だけ、報酬を選び直せる'},
-  {id:'three', name:'報酬3択', prices:[150], desc:'撃破後の報酬が3つから選べる'}
+  {id:'three', name:'報酬3択', prices:[150], from:2, desc:'3階・4階を突破したあとの報酬が3つから選べる'}   // from：3択になる最初の階（0始まり）。序盤の3択は効きすぎるので後半2回だけ
 ];
 const RG_UPGRADE = Object.fromEntries(RG_UPGRADES.map(u=>[u.id,u]));
-// 冒険モードで使えるようになる条件（対戦モードでは最初から全員使える）。diff を chars 人の別キャラで踏破
+// 冒険モードで使えるようになる条件（対戦モードでは最初から全員使える）。diff 以上の難易度を chars 人の別キャラで踏破
 const RG_CHAR_UNLOCK = {
-  shizuku:{diff:'easy', chars:2, text:'「やさしい」を2人の別キャラで踏破すると解放'},
-  doran:  {diff:'normal', chars:1, text:'「ふつう」を踏破すると解放'}
+  shizuku:{diff:'easy', chars:2, text:'「やさしい」以上を2人の別キャラで踏破すると解放'},
+  doran:  {diff:'normal', chars:1, text:'「ふつう」以上を踏破すると解放'}
 };
 // 持ち越しデータ（進行中の冒険とは別に保存）。cleared：難易度ごとの踏破したキャラ
 function rgNewMeta(){
   return {v:1, souls:0, ups:Object.fromEntries(RG_UPGRADES.map(u=>[u.id,0])), cleared:Object.fromEntries(RG_DIFFS.map(d=>[d.id,[]]))};
 }
-const rgCharOpen = (meta, id) => { const u = RG_CHAR_UNLOCK[id]; return !u || meta.cleared[u.diff].length >= u.chars; };
+// 条件の難易度より上で踏破したキャラも数える
+function rgCharOpen(meta, id){
+  const u = RG_CHAR_UNLOCK[id];
+  if(!u) return true;
+  const above = RG_DIFFS.slice(RG_DIFFS.findIndex(d=>d.id===u.diff));
+  return new Set(above.flatMap(d=>meta.cleared[d.id])).size >= u.chars;
+}
 // 次の段階の値段。上限まで買っていたら null
 const rgUpPrice = (meta, id) => RG_UPGRADE[id].prices[meta.ups[id]] ?? null;
 function rgBuy(meta, id){
@@ -979,7 +985,7 @@ function rgNewRunState(diffId, charId, meta){
   const ups = meta?.ups || {};
   ch.hp += (ups.hp||0)*RG_UPGRADE.hp.hp; ch.mp += (ups.mp||0)*RG_UPGRADE.mp.mp;
   return {v:2, diff:diffId, charId, ch, lv:1, exp:0, hp:ch.hp, floor:0, feathers:RG_DIFF[diffId].feathers,
-    picks:[], stage:'map', battle:null, offer:null, wins:0, turns:0, choices:ups.three ? 3 : 2, rerolls:ups.reroll ? 1 : 0};
+    picks:[], stage:'map', battle:null, offer:null, wins:0, turns:0, three:!!ups.three, rerolls:ups.reroll ? 1 : 0};
 }
 
 function rgEnemy(run){
@@ -1045,8 +1051,8 @@ function rgGainExp(run, n){
   return ups;
 }
 
-// 撃破後の報酬（2択、報酬3択を買っていれば3択）。heal:true が回復系
-function rgOffers(run){
+// 撃破後の報酬（n 択）。heal:true が回復系
+function rgOffers(run, n){
   const ch = run.ch, W = rgReward(run);
   const ups = [
     {t:'hp',  v:W.hp,   name:'体力強化', desc:`最大HP+${W.hp}（同じだけ回復）`},
@@ -1067,14 +1073,13 @@ function rgOffers(run){
     {t:'heal', v:W.heal2, heal:true, name:'薬草', desc:`最大HPの${Math.round(W.heal2*100)}%回復`}
   ];
   const hurt = run.hp < ch.hp;
-  const n = run.choices || 2;
   if(hurt && (run.hp <= ch.hp*RG_RESCUE || Math.random() < W.healChance)) return shuffle([pickOne(heals), ...(n>2 ? shuffle(ups).slice(0,n-1) : [pickOne(ups)])]);
   return shuffle(ups).slice(0,n);
 }
-// 報酬の引き直し（1ランに rerolls 回）。rgOffers で作り直すので救済ルールもそのまま守られる
+// 報酬の引き直し（1ランに rerolls 回）。同じ数の選択肢を rgOffers で作り直すので救済ルールもそのまま守られる
 function rgReroll(run){
   if(!(run.rerolls > 0) || run.stage!=='reward') return false;
-  run.rerolls--; run.offer = rgOffers(run);
+  run.rerolls--; run.offer = rgOffers(run, run.offer.length);
   return true;
 }
 
@@ -1114,7 +1119,7 @@ function rgCommitWin(run, st, revived){
   const gain = st.B.u.exp || 0, ups = rgGainExp(run, gain);
   run.battle = null;
   if(boss){ run.stage = 'cleared'; return {type:'clear', foe:st.B.u.name, revived}; }
-  run.stage = 'reward'; run.offer = rgOffers(run);
+  run.stage = 'reward'; run.offer = rgOffers(run, run.three && run.floor >= RG_UPGRADE.three.from ? 3 : 2);
   return {type:'win', foe:st.B.u.name, gain, ups, turn:st.turn, revived};
 }
 function rgAfterReward(run, i){ rgApply(run, run.offer[i]); run.offer = null; run.floor++; run.stage = 'map'; }
@@ -1133,7 +1138,7 @@ function rgLoad(){
   if(r.stage==='battle' && !(r.battle?.state?.A?.u && r.battle.state.B?.u)) return null;
   if(r.stage==='reward' && !Array.isArray(r.offer)) return null;
   if(r.rerolls!=null && !Number.isInteger(r.rerolls)) return null;
-  if(r.choices!=null && ![2,3].includes(r.choices)) return null;
+  if(r.three!=null && typeof r.three!=='boolean') return null;
   return r;
 }
 // 持ち越しデータ（戦魂・永続強化・キャラの解放）。形が違えば壊れているとみなし、初期状態から始める
@@ -1258,7 +1263,7 @@ function rgPerksText(meta){
   if(u.hp) t.push(`初期HP+${u.hp*RG_UPGRADE.hp.hp}`);
   if(u.mp) t.push(`初期MP+${u.mp*RG_UPGRADE.mp.mp}`);
   if(u.reroll) t.push('報酬の引き直し');
-  if(u.three) t.push('報酬3択');
+  if(u.three) t.push(`報酬3択（${RG_UPGRADE.three.from+1}階から）`);
   return t.join('・');
 }
 
