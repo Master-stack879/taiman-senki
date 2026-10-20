@@ -1,6 +1,6 @@
 # 無限回廊 オンラインランキング（サーバー側の準備）
 
-ゲーム本体（`index.html`）はまだ変更していません。ここにあるのは、ランキングの受け皿（Firebase の Cloud Firestore）の設定と確認用のファイルです。
+ランキングの受け皿（Firebase の Cloud Firestore）の設定と確認用のファイルです。ゲーム本体（`index.html`）への組み込みは済んでいます（docs/冒険モード設計方針.md の「オンラインランキング」）。
 
 | ファイル | 内容 |
 |---|---|
@@ -9,6 +9,7 @@
 | `test.html` | 本番プロジェクトで送信・読み出し・弾かれるかを試すページ |
 | `test/rules.test.mjs` | ルールの自動テスト（Firestore エミュレーター） |
 | `test/page.test.mjs` | `test.html` をエミュレーター相手にブラウザで操作する自動テスト |
+| `test/game.test.mjs` | ゲーム本体（`index.html?rank-emulator`）の無限回廊ランキングをエミュレーター相手に操作する自動テスト |
 | `firebase.json` / `package.json` | エミュレーターとテストの設定 |
 
 ## サービス：Cloud Firestore（Firebase の Spark プラン＝無料）
@@ -42,7 +43,7 @@
 
 ### 連続投稿よけ
 
-- ゲームは起動時に Firebase の**匿名ログイン**をします（名前やメールは不要。ブラウザに匿名の ID が保存されるだけ）。
+- ゲームは記録を送るときに Firebase の**匿名ログイン**をします（名前やメールは不要。ブラウザに匿名の ID が保存されるだけ）。
 - 記録を送るときは、`scores` への追加と `limits/{匿名ID}`（中身は最終投稿時刻 `last` だけ）の更新を**1回の一括書き込み**で行います。
 - ルールは「`limits` の更新とセットでないと記録を追加できない」「前回から60秒経っていないと `limits` を更新できない」を強制します。秒数は `firestore.rules` の `cooldownSec()` で変えられます。
 - `scores` の記録には匿名 ID を入れません（送るのは上の5項目だけ）。`limits` は誰も読めません。
@@ -125,6 +126,7 @@ cd ranking
 npm install
 npm test            # ルールのテスト（11項目）
 npm run test:page   # test.html をブラウザで操作するテスト（Playwright）
+npm run test:game   # ゲーム本体のランキング（名前・1回だけ送る・オフライン）をブラウザで操作するテスト
 ```
 
 `npm run emulators` でエミュレーターを立てて、`test.html?emulator` を開くと手元で試せます（接続設定は `{ apiKey: "demo-key", projectId: "demo-taiman" }` でよい）。
