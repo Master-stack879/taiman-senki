@@ -183,6 +183,8 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .warn .link{flex:none}
 .codeBox{all:unset;box-sizing:border-box;display:block;width:100%;min-height:7.5em;background:var(--well);color:var(--ink);font-family:monospace;font-size:13px;line-height:1.5;padding:8px 10px;border-radius:5px;word-break:break-all;white-space:pre-wrap;overflow-wrap:anywhere}
 .codeBox:focus-visible{outline:2px solid var(--accent)}
+.tcBox{all:unset;box-sizing:border-box;width:9.5em;background:var(--well);color:var(--ink);font-family:monospace;font-size:20px;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:5px}
+.tcBox:focus-visible{outline:2px solid var(--accent)}
 .err{margin:0;color:var(--hp-low);font-size:13px}
 .ok{margin:0;color:var(--hp);font-size:13px}
 .link{all:unset;cursor:pointer;color:var(--muted);font-size:12.5px;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
@@ -1393,7 +1395,7 @@ const RK_CONFIG = {
   appId: "1:243084106210:web:0563a291feeedb6bab81bb"
 };
 const RK_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
-const RK_VER = '2026-10-20';                    // 記録に入れるゲームのバージョン（16文字以内）
+const RK_VER = '2026-10-20b';                   // 記録に入れるゲームのバージョン（16文字以内）
 const RK_NAME = 'taiman-senki:rogue-name';      // 前回入れた名前
 const RK_PENDING = 'taiman-senki:rank-pending'; // まだ送れていない記録 {v:1, list:[{id, name, char, floor, tries}]}
 const RK_TOP = 20, RK_TIMEOUT = 15000, RK_TRIES = 5, RK_KEEP = 10;
@@ -1516,6 +1518,63 @@ function rgShowRanking(back){
   });
 }
 
+/* ---- 短い引き継ぎコード（サーバーは ranking/ と同じ Firestore。ranking/README.md の「引き継ぎコード」） ---- */
+// サーバーに置くのはセーブコードの文字列そのもの（rgExportCode）。読み込むときもセーブコードと同じ確認（rgParseCode）を通す
+// コードは見間違えやすい 0/O・1/I/L を除いた31文字から8文字。ドキュメント ID がコード。発行から7日で無効、1回使うと消える
+const TC_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ', TC_LEN = 8, TC_DAYS = 7;
+const TC_HELP = `引き継ぎコードの有効期限は発行から${TC_DAYS}日間です。1回使うと無効になります。`;
+const tcNewCode = () => { let c = ''; while(c.length<TC_LEN) for(const x of crypto.getRandomValues(new Uint8Array(16))) if(x<248 && c.length<TC_LEN) c += TC_CHARS[x%31]; return c; };
+const tcShow = code => code.slice(0,4) + '-' + code.slice(4);
+// 入力：区切り・空白・全角・大文字小文字の違いを許す。戻り値：{code} か {error:理由}
+function tcParse(raw){
+  const s = String(raw ?? '').normalize('NFKC').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if(!s) return {error:'引き継ぎコードを入れてください。'};
+  if(s.length!==TC_LEN) return {error:`引き継ぎコードは${TC_LEN}文字です（「-」は入れても入れなくてもかまいません）。打ち間違いがないか確かめてください。`};
+  if([...s].some(c=>!TC_CHARS.includes(c))) return {error:'引き継ぎコードに使わない文字（0・O・1・I・L）が入っています。打ち間違いがないか確かめてください。'};
+  return {code:s};
+}
+const tcErr = code => Object.assign(new Error(code), {code});
+// 発行：transfers/{コード} の追加と tlimits/{匿名ID} の更新を1回の一括書き込みで（連続発行よけ）。戻り値：{code, until}
+async function tcIssue(){
+  const save = rgExportCode();
+  const {auth, fs, db, au} = await rkFirebase();
+  await au.authStateReady();
+  if(!au.currentUser) await auth.signInAnonymously(au);
+  const code = tcNewCode(), ref = fs.doc(db, 'transfers', code), b = fs.writeBatch(db);
+  b.set(ref, {save, at:fs.serverTimestamp()});
+  b.set(fs.doc(db, 'tlimits', au.currentUser.uid), {last:fs.serverTimestamp()});
+  await b.commit();
+  // 期限はサーバーの発行時刻から。読めなければ端末の時計で
+  const at = (await fs.getDoc(ref).catch(()=>null))?.data({serverTimestamps:'estimate'})?.at?.toDate?.() || new Date();
+  return {code, until:new Date(at.getTime() + TC_DAYS*864e5)};
+}
+// コードの中身（セーブコードの文字列）を読む。期限切れは読めない（ルールで弾かれる）。無いときは使用済みの印を見て分ける
+async function tcFetch(code){
+  const {fs, db} = await rkFirebase();
+  let snap;
+  try{ snap = await fs.getDoc(fs.doc(db, 'transfers', code)); }
+  catch(e){ throw e?.code==='permission-denied' ? tcErr('expired') : e; }
+  if(snap.exists()) return String(snap.data().save ?? '');
+  throw tcErr((await fs.getDoc(fs.doc(db, 'spent', code))).exists() ? 'used' : 'missing');
+}
+// 使い終わり：transfers/{コード} の削除と spent/{コード} の追加を1回の一括書き込みで。先に使われた・期限が切れたら弾かれる
+async function tcRedeem(code){
+  const {fs, db} = await rkFirebase();
+  const b = fs.writeBatch(db);
+  b.delete(fs.doc(db, 'transfers', code));
+  b.set(fs.doc(db, 'spent', code), {at:fs.serverTimestamp()});
+  try{ await b.commit(); }catch(e){ throw e?.code==='permission-denied' ? tcErr('gone') : e; }
+}
+const TC_FALLBACK = '長いセーブコード（「セーブコードを書き出す」で出るもの）でも移せます。';
+const tcWhy = code => ({
+  expired:`この引き継ぎコードは有効期限（発行から${TC_DAYS}日）が切れています。元の端末でもう一度発行してください。`,
+  used:'この引き継ぎコードは使用済みです（1回使うと無効になります）。元の端末でもう一度発行してください。',
+  missing:'この引き継ぎコードは見つかりませんでした。打ち間違いがないか確かめてください。',
+  gone:'この引き継ぎコードは、使用済みになったか有効期限が切れました。元の端末でもう一度発行してください。',
+  'permission-denied':'発行を受け付けてもらえませんでした。続けて発行したときは、1分ほど待ってからもう一度押してください。',
+}[code] || 'サーバーに接続できませんでした。ネットにつながっているか確かめて、もう一度試してください。') + TC_FALLBACK;
+const tcUntil = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} まで有効`;
+
 function refreshRogueMode(){
   const r = rgLoad();
   $('rogueDesc').textContent = r ? `続きから遊べます（${CHAR[r.charId].name} Lv${r.lv}・${r.floor+1}F／${RG_MODES[r.diff].name}）`
@@ -1603,14 +1662,19 @@ function rgCodePanel(){
   const p = el('div','panel'); p.id = 'rgCode';
   p.append(el('h3','h3','セーブコード'),
     el('p','muted',RG_CODE_HELP),
-    el('p','muted','戦魂・永続強化・キャラの解放・記録（無限回廊の記録を含む）を、別のブラウザや端末へ移せます（進行中の冒険は含みません）。Discord・LINE・Instagram・X などのアプリ内で開いていると記録が消えることがあります。メニューから『ブラウザで開く』を選び、セーブコードで記録を移してください。'));
+    el('p','muted','戦魂・永続強化・キャラの解放・記録（無限回廊の記録を含む）を、別のブラウザや端末へ移せます（進行中の冒険は含みません）。Discord・LINE・Instagram・X などのアプリ内で開いていると記録が消えることがあります。メニューから『ブラウザで開く』を選び、セーブコードで記録を移してください。'),
+    el('p','muted','手で打てる短い「引き継ぎコード」でも移せます（ネットにつながっているときだけ）。' + TC_HELP));
   if(!LS_OK) p.append(el('p','err','このブラウザでは保存ができないため、ページを閉じると記録が消えます。セーブコードを書き出しておいてください。'));
   const row = el('div','onRow');
   const ex = el('button','btn','セーブコードを書き出す'); ex.type='button'; ex.id='rgExport';
   const im = el('button','btn','セーブコードを読み込む'); im.type='button'; im.id='rgImport';
   row.append(ex, im);
+  const row2 = el('div','onRow');
+  const tx = el('button','btn','引き継ぎコードを発行'); tx.type='button'; tx.id='rgTcIssue';
+  const ti = el('button','btn','引き継ぎコードで読み込む'); ti.type='button'; ti.id='rgTcLoad';
+  row2.append(tx, ti);
   const area = el('div','screen');
-  p.append(row, area);
+  p.append(row, row2, area);
   const box = (ro)=>{ const t = el('textarea','codeBox'); t.id = 'rgCodeText'; t.rows = 3; t.spellcheck = false; t.setAttribute('autocomplete','off'); t.setAttribute('aria-label','セーブコード'); t.readOnly = ro; return t; };
   ex.addEventListener('click', ()=>{
     area.innerHTML = '';
@@ -1631,22 +1695,74 @@ function rgCodePanel(){
       const got = rgParseCode(t.value);
       if(got.error){ msg.textContent = got.error; return; }
       msg.textContent = '';
-      const cur = rgMeta();
-      askConfirm('セーブコードを読み込みますか？',
-        `今の戦魂${cur.souls}、強化${rgUpSteps(cur)}段階が、コードの内容（戦魂${got.meta.souls}、強化${rgUpSteps(got.meta)}段階）に置き換わります。キャラの解放と記録も置き換わります。`
-          + (got.endless ? '' : 'このコードは古い版で無限回廊の記録を含まないため、今の無限回廊の記録はそのまま残ります。') + '進行中の冒険はそのまま残ります。',
-        '置き換える', ()=>{
-          lsSet(RG_META, got.meta); lsSet(RG_BEST, got.best);
-          if(got.endless) lsSet(RG_ENDLESS_BEST, got.endless);
-          rgShowDiffs();
-          const done = el('p','ok','セーブコードを読み込みました。'); done.setAttribute('role','status');
-          $('rgCode').append(done); $('rgImport').focus();
-        });
+      rgAskImport('セーブコードを読み込みますか？', got, ()=>rgApplyImport(got, 'セーブコードを読み込みました。', 'rgImport'));
     });
     const r = el('div','onRow'); r.append(go);
     area.append(t, r, msg); t.focus();
   });
+  tx.addEventListener('click', ()=>{
+    area.innerHTML = '';
+    const msg = el('p','muted','発行しています…'); msg.id = 'rgTcMsg'; msg.setAttribute('aria-live','polite');
+    area.append(msg); tx.disabled = true;
+    rkTimeout(tcIssue()).then(({code, until})=>{
+      if(!msg.isConnected) return;
+      const t = el('input','tcBox'); t.id = 'rgTcCode'; t.readOnly = true; t.value = tcShow(code); t.setAttribute('aria-label','引き継ぎコード');
+      t.addEventListener('focus', ()=>t.select());
+      const cp = el('button','btn primary','コピー'); cp.type='button'; cp.id='rgTcCopy';
+      cp.addEventListener('click', ()=>rgCopyCode(t, msg));
+      const u = el('span','muted',tcUntil(until)); u.id = 'rgTcUntil';
+      const r = el('div','onRow'); r.append(t, u, cp);
+      msg.className = 'muted';
+      msg.textContent = `移したい先の端末で「引き継ぎコードで読み込む」に入れてください。${TC_HELP}`;
+      area.prepend(r);
+    }, e=>{
+      if(!msg.isConnected) return;
+      msg.className = 'err'; msg.setAttribute('role','alert'); msg.textContent = tcWhy(e?.code);
+    }).finally(()=>{ tx.disabled = false; });
+  });
+  ti.addEventListener('click', ()=>{
+    area.innerHTML = '';
+    const t = el('input','tcBox'); t.id = 'rgTcInput'; t.placeholder = 'K7MQ-2XPA'; t.maxLength = 20; t.spellcheck = false;
+    t.setAttribute('autocomplete','off'); t.setAttribute('autocapitalize','characters'); t.setAttribute('aria-label','引き継ぎコード');
+    const go = el('button','btn primary','読み込む'); go.type='button'; go.id='rgTcGo';
+    const msg = el('p','err',''); msg.id = 'rgTcMsg'; msg.setAttribute('role','alert');
+    const fail = e=>{ if(msg.isConnected){ msg.className = 'err'; msg.textContent = tcWhy(e?.code); } };
+    const busy = (on, text='')=>{ go.disabled = on; msg.className = on ? 'muted' : 'err'; msg.textContent = text; };
+    go.addEventListener('click', ()=>{
+      const c = tcParse(t.value);
+      if(c.error){ msg.className = 'err'; msg.textContent = c.error; return; }
+      busy(true, '確認しています…');
+      rkTimeout(tcFetch(c.code)).then(save=>{
+        busy(false);
+        const got = rgParseCode(save);
+        if(got.error){ msg.textContent = got.error + TC_FALLBACK; return; }
+        rgAskImport('引き継ぎコードで読み込みますか？', got, ()=>{
+          busy(true, '読み込んでいます…');
+          rkTimeout(tcRedeem(c.code)).then(()=>rgApplyImport(got, '引き継ぎコードで読み込みました。このコードはもう使えません。', 'rgTcLoad'), fail)
+            .finally(()=>{ if(go.isConnected) go.disabled = false; });
+        });
+      }, e=>{ busy(false); fail(e); });
+    });
+    t.addEventListener('keydown', e=>{ if(e.key==='Enter') go.click(); });
+    const r = el('div','onRow'); r.append(t, go);
+    area.append(r, msg); t.focus();
+  });
   return p;
+}
+// 読み込む前の確認（セーブコード・引き継ぎコード共通）
+function rgAskImport(title, got, onOk){
+  const cur = rgMeta();
+  askConfirm(title,
+    `今の戦魂${cur.souls}、強化${rgUpSteps(cur)}段階が、コードの内容（戦魂${got.meta.souls}、強化${rgUpSteps(got.meta)}段階）に置き換わります。キャラの解放と記録も置き換わります。`
+      + (got.endless ? '' : 'このコードは古い版で無限回廊の記録を含まないため、今の無限回廊の記録はそのまま残ります。') + '進行中の冒険はそのまま残ります。',
+    '置き換える', onOk);
+}
+function rgApplyImport(got, text, focusId){
+  lsSet(RG_META, got.meta); lsSet(RG_BEST, got.best);
+  if(got.endless) lsSet(RG_ENDLESS_BEST, got.endless);
+  rgShowDiffs();
+  const done = el('p','ok',text); done.setAttribute('role','status');
+  $('rgCode').append(done); $(focusId).focus();
 }
 // コピーできない環境では、コードを選択した状態にして長押しでコピーしてもらう
 function rgCopyCode(t, msg){
