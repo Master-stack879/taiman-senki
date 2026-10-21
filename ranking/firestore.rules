@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// タイマン戦記：無限回廊オンラインランキングと、短い引き継ぎコード
+// タイマン戦記：無限回廊オンラインランキング、短い引き継ぎコード、オンライン対戦
 //
 // scores/{id}  … 1件の記録。誰でも読める。追加だけ（変更・削除は不可）。
 // limits/{uid} … 連続投稿よけ。端末（匿名ログイン）ごとの最終投稿時刻だけを持つ。
@@ -13,6 +13,13 @@ rules_version = '2';
 // 引き継ぎコードの発行は transfers の追加と tlimits/{uid} の更新を、
 // 読み込みは transfers の削除と spent の追加を、それぞれ1回の一括書き込みで行う。
 // 管理画面（Firebase コンソール）からの削除にはこのルールはかからない。
+//
+// オンライン対戦（docs/オンライン対戦サーバー化.md）。戦闘の計算はプレイヤーのブラウザで行い、結果をここに書く。
+// matches/{mid}             … 試合1件。誰でも1件ずつ読める（観戦）。書けるのはその試合の2人だけ。
+// matches/{mid}/picks/{A|B} … 選んだ技。本人だけが書ける。相手の技は、自分が同じターンの技を書いたあとでないと読めない。
+// matches/{mid}/preds/{uid} … 勝敗予想（ルームの対戦の観戦者だけ。1ターン目の決着まで）。
+// rooms/{code}              … 友達と遊ぶルーム（座席2つ・名前・キャラ・準備・今の試合）。
+// queue/{uid}               … ランダムマッチの待ち行列。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -106,6 +113,270 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['last'])
         && request.resource.data.last == request.time
         && request.time >= resource.data.last + duration.value(cooldownSec(), 's');
+      allow delete: if false;
+    }
+
+    // ================= オンライン対戦 =================
+    // 1ターンの期限（秒）：技を選ぶ60秒＋演出の10秒。ゲーム側の ON_TURN_SEC と同じ値にする
+    // 期限は「ターンが始まったサーバーの時刻（tt）＋この秒数」。端末からは時刻の足し算を書けないので、tt だけを持つ
+    function turnSec() { return 70; }
+    function turnEnd(r) { return r.tt + duration.value(turnSec(), 's'); }
+    // ランダムマッチ：待ち行列に載っている秒数と、割り当てられた側が参加を確かめるまでの秒数
+    function queueSec() { return 60; }
+    function hereSec() { return 15; }
+    // ルームは最後に動きがあってから2時間で期限切れ（同じコードを新しいルームに使える）
+    function roomHours() { return 2; }
+
+    function roster() { return ['kai', 'mira', 'gard', 'rin', 'shizuku', 'doran']; }
+    // キャラの最大HP・最大MP・開始時のMP（index.html の CHARS と同じ値。対戦モードの基本値を変えたら合わせて直す）
+    function maxHp(id) { return {'kai': 140, 'mira': 132, 'gard': 190, 'rin': 120, 'shizuku': 120, 'doran': 150}[id]; }
+    function maxMp(id) { return {'kai': 60, 'mira': 100, 'gard': 50, 'rin': 70, 'shizuku': 60, 'doran': 50}[id]; }
+    function startMp(id) { return {'kai': 30, 'mira': 50, 'gard': 25, 'rin': 35, 'shizuku': 30, 'doran': 25}[id]; }
+    function sides() { return ['A', 'B']; }
+    function oppOf(s) { return s == 'A' ? 'B' : 'A'; }
+    function uid() { return request.auth.uid; }
+    function now() { return request.time; }
+
+    // 名前：ランキングと同じ（1〜12文字、空白だけは不可。禁止語はゲーム側で確かめる）
+    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 12 && !n.matches('^[\\s　]*$'); }
+    function small(n) { return n is int && n >= 0 && n <= 9; }
+    // 戦闘中の1陣営（index.html の newF と同じ項目）。HP は 0〜最大HP、MP は 0〜最大MP
+    function validF(f, id) {
+      return f is map
+        && f.keys().hasOnly(['id', 'hp', 'mp', 'defUp', 'evade', 'atkUp', 'poison', 'stun', 'guard', 'counter'])
+        && f.keys().hasAll(['id', 'hp', 'mp', 'defUp', 'evade', 'atkUp', 'poison', 'stun', 'guard', 'counter'])
+        && f.id == id
+        && f.hp is int && f.hp >= 0 && f.hp <= maxHp(id)
+        && f.mp is int && f.mp >= 0 && f.mp <= maxMp(id)
+        && small(f.defUp) && small(f.evade) && small(f.atkUp) && small(f.poison) && small(f.stun) && small(f.guard)
+        && f.counter is number && f.counter >= 0 && f.counter <= 3;
+    }
+    function startF(id) {
+      return {'id': id, 'hp': maxHp(id), 'mp': startMp(id), 'defUp': 0, 'evade': 0, 'atkUp': 0,
+              'poison': 0, 'stun': 0, 'guard': 0, 'counter': 0};
+    }
+    function validSt(st, chars, turn) {
+      return st is map && st.keys().hasOnly(['turn', 'A', 'B']) && st.keys().hasAll(['turn', 'A', 'B'])
+        && st.turn == turn && validF(st.A, chars.A) && validF(st.B, chars.B);
+    }
+    function ab(m) { return m is map && m.keys().hasOnly(['A', 'B']) && m.keys().hasAll(['A', 'B']); }
+
+    function matchPath(mid) { return /databases/$(database)/documents/matches/$(mid); }
+    function pickPath(mid, s) { return /databases/$(database)/documents/matches/$(mid)/picks/$(s); }
+    function roomPath(code) { return /databases/$(database)/documents/rooms/$(code); }
+    function queuePath(id) { return /databases/$(database)/documents/queue/$(id); }
+    // そのターンの技を書いてあるか
+    function picked(mid, s, turn) { return exists(pickPath(mid, s)) && get(pickPath(mid, s)).data.turn == turn; }
+
+    // ---- 試合 ----
+    // 新しい試合：初期状態（index.html の initState と同じ）。期限・時刻はサーバーの時刻から
+    function newMatch(d) {
+      return d.keys().hasOnly(['kind', 'room', 'p', 'names', 'chars', 'st', 'turn', 'ready', 'log', 'lt', 'tt', 'at', 'over', 'end', 'here'])
+        && d.keys().hasAll(['kind', 'room', 'p', 'names', 'chars', 'st', 'turn', 'ready', 'log', 'lt', 'tt', 'at', 'over', 'end', 'here'])
+        && ab(d.p) && d.p.A is string && d.p.B is string && d.p.A != d.p.B
+        && ab(d.names) && validName(d.names.A) && validName(d.names.B)
+        && ab(d.chars) && d.chars.A in roster() && d.chars.B in roster()
+        && d.turn == 1 && d.st == {'turn': 1, 'A': startF(d.chars.A), 'B': startF(d.chars.B)}
+        && d.ready == {'A': 0, 'B': 0} && d.log == '[]' && d.lt == 0
+        && d.tt == now() && d.at == now()
+        && d.over == null && d.end == null;
+    }
+    // ランダムマッチ：待ち行列の相手（B）を、その待ち行列の更新と一緒に割り当てる。作るのは A（自分）
+    function newRandomMatch(mid, d) {
+      return d.kind == 'random' && d.room == null && d.p.A == uid() && d.here == {'A': true, 'B': false}
+        && get(queuePath(d.p.B)).data.mid == null
+        && get(queuePath(d.p.B)).data.at + duration.value(queueSec(), 's') > now()
+        && get(queuePath(d.p.B)).data.name == d.names.B
+        && get(queuePath(d.p.B)).data.char == d.chars.B
+        && getAfter(queuePath(d.p.B)).data.mid == mid;
+    }
+    // ルームの試合：ルームの mid の更新と一緒に作る。座席・名前・キャラはルームと同じ
+    function newRoomMatch(mid, d) {
+      return d.kind == 'room' && d.room is string && (d.p.A == uid() || d.p.B == uid()) && d.here == {'A': true, 'B': true}
+        && getAfter(roomPath(d.room)).data.mid == mid
+        && getAfter(roomPath(d.room)).data.seats == d.p
+        && getAfter(roomPath(d.room)).data.names == d.names
+        && getAfter(roomPath(d.room)).data.chars == d.chars;
+    }
+    function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    // 技を選んだ印：自分の側の ready を今のターンにする（同じ一括書き込みで技を書く）
+    function readyAs(mid, s, r, d) {
+      return r.p[s] == uid() && changed(['ready']) && r.over == null
+        && d.ready[s] == r.turn && d.ready[oppOf(s)] == r.ready[oppOf(s)]
+        && getAfter(pickPath(mid, s)).data.turn == r.turn;
+    }
+    // ターンの計算結果：両者の技がそろっていること。期限を過ぎていても計算できる（戻ってきた方が続けられる）
+    // 盤面は形と範囲（HP 0〜最大HP、MP 0〜最大MP、キャラは変えない）を確かめる。決着は HP と合っていること
+    function resolveBy(mid, r, d) {
+      return (r.p.A == uid() || r.p.B == uid()) && r.over == null
+        && changed(['st', 'turn', 'log', 'lt', 'tt', 'over', 'end'])
+        && picked(mid, 'A', r.turn) && picked(mid, 'B', r.turn)
+        && d.lt == r.turn && d.log is string && d.log.size() <= 10000
+        && d.tt == now()
+        && validSt(d.st, r.chars, d.turn)
+        && ((d.over == null && d.end == null && d.turn == r.turn + 1 && d.st.A.hp > 0 && d.st.B.hp > 0)
+          || (d.end == 'ko' && d.turn == r.turn && (
+               (d.over == 'A' && d.st.A.hp > 0 && d.st.B.hp == 0)
+            || (d.over == 'B' && d.st.B.hp > 0 && d.st.A.hp == 0)
+            || (d.over == 'draw' && d.st.A.hp == 0 && d.st.B.hp == 0))));
+    }
+    // 時間切れ：期限を過ぎても相手が選んでいなければ、選んだ側の勝ち。両者とも選んでいなければ引き分け
+    // 両者の技がそろっているときは時間切れにできない（計算して続ける）
+    function timeoutAs(mid, s, r, d) {
+      return r.p[s] == uid() && r.over == null && changed(['over', 'end']) && d.end == 'timeout'
+        && now() > turnEnd(r)
+        && ((d.over == s && picked(mid, s, r.turn) && !picked(mid, oppOf(s), r.turn))
+          || (d.over == 'draw' && !picked(mid, 'A', r.turn) && !picked(mid, 'B', r.turn)));
+    }
+    // 降参（対戦中に退出）：相手の勝ち。いつでもできる
+    function surrenderAs(s, r, d) {
+      return r.p[s] == uid() && r.over == null && changed(['over', 'end']) && d.end == 'left' && d.over == oppOf(s);
+    }
+    // ランダムマッチ：割り当てられた側（B）が参加を確かめる。期限内に確かめなければ A が取り消せる
+    function hereB(r, d) {
+      return r.kind == 'random' && r.p.B == uid() && r.over == null && changed(['here'])
+        && d.here == {'A': true, 'B': true} && now() <= r.at + duration.value(hereSec(), 's');
+    }
+    function cancelA(r, d) {
+      return r.kind == 'random' && r.p.A == uid() && r.over == null && r.here.B == false && changed(['over', 'end'])
+        && d.over == 'void' && d.end == 'cancel' && now() > r.at + duration.value(hereSec(), 's');
+    }
+
+    match /matches/{mid} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null && newMatch(request.resource.data)
+        && (newRandomMatch(mid, request.resource.data) || newRoomMatch(mid, request.resource.data));
+      allow update: if request.auth != null && (
+           readyAs(mid, 'A', resource.data, request.resource.data)
+        || readyAs(mid, 'B', resource.data, request.resource.data)
+        || resolveBy(mid, resource.data, request.resource.data)
+        || timeoutAs(mid, 'A', resource.data, request.resource.data)
+        || timeoutAs(mid, 'B', resource.data, request.resource.data)
+        || surrenderAs('A', resource.data, request.resource.data)
+        || surrenderAs('B', resource.data, request.resource.data)
+        || hereB(resource.data, request.resource.data)
+        || cancelA(resource.data, request.resource.data));
+      allow delete: if false;
+
+      // 選んだ技。1ターンに1回だけ、期限内に、試合の ready の更新と一緒に書く
+      match /picks/{side} {
+        function m() { return get(matchPath(mid)).data; }
+        function pickOk() {
+          return request.auth != null && side in sides() && m().p[side] == uid() && m().over == null
+            && request.resource.data.keys().hasOnly(['turn', 'idx']) && request.resource.data.keys().hasAll(['turn', 'idx'])
+            && request.resource.data.turn == m().turn
+            && request.resource.data.idx is int && request.resource.data.idx >= 0 && request.resource.data.idx <= 3
+            && now() <= turnEnd(m())
+            && getAfter(matchPath(mid)).data.ready[side] == m().turn;
+        }
+        // 自分の技はいつでも読める。相手の技は、自分が同じターンの技を書いたあとだけ（同時に選ぶ読み合いを守る）。観戦者は読めない
+        function mine(s) { return m().p[s] == uid(); }
+        function revealed(s) { return picked(mid, s, resource.data.turn); }
+        allow get: if request.auth != null && side in sides() && (mine(side)
+          || (mine(oppOf(side)) && revealed(oppOf(side))));
+        allow list: if false;
+        allow create: if pickOk();
+        allow update: if pickOk() && resource.data.turn < m().turn;
+        allow delete: if false;
+      }
+
+      // 勝敗予想：観戦者（その試合のプレイヤー以外）が1人1件。ルームの対戦の1ターン目が決着するまで
+      match /preds/{pid} {
+        allow get: if true;
+        allow list: if request.query.limit <= 100;
+        allow create: if request.auth != null && pid == uid()
+          && get(matchPath(mid)).data.kind == 'room'
+          && get(matchPath(mid)).data.turn == 1 && get(matchPath(mid)).data.over == null
+          && get(matchPath(mid)).data.p.A != uid() && get(matchPath(mid)).data.p.B != uid()
+          && request.resource.data.keys().hasOnly(['side']) && request.resource.data.side in sides();
+        allow update, delete: if false;
+      }
+    }
+
+    // ---- ランダムマッチの待ち行列 ----
+    // 自分の分（ID は匿名 ID）を作る・入り直す。候補になるのは入った時刻（at）から60秒まで
+    function newQueue(d) {
+      return d.keys().hasOnly(['name', 'char', 'at', 'mid']) && d.keys().hasAll(['name', 'char', 'at', 'mid'])
+        && validName(d.name) && d.char in roster() && d.at == now() && d.mid == null;
+    }
+    match /queue/{qid} {
+      allow get: if true;
+      allow list: if request.query.limit <= 10;
+      allow create: if request.auth != null && qid == uid() && newQueue(request.resource.data);
+      // 本人の入り直し、または相手（A）が試合を作って割り当てる（mid を入れるだけ）
+      allow update: if request.auth != null && (
+          (qid == uid() && newQueue(request.resource.data))
+        || (qid != uid() && changed(['mid']) && resource.data.mid == null
+            && resource.data.at + duration.value(queueSec(), 's') > now()
+            && request.resource.data.mid is string
+            && getAfter(matchPath(request.resource.data.mid)).data.kind == 'random'
+            && getAfter(matchPath(request.resource.data.mid)).data.p.A == uid()
+            && getAfter(matchPath(request.resource.data.mid)).data.p.B == qid));
+      allow delete: if request.auth != null && qid == uid();
+    }
+
+    // ---- ルーム ----
+    // コードは5文字（見間違えやすい i/l/o/0/1 を除く）
+    function validRoomCode(code) { return code.matches('^[a-hjkmnp-z2-9]{5}$'); }
+    // at は最後に動きがあったサーバーの時刻（更新のたびに今の時刻にする）
+    function roomAlive(r) { return now() <= r.at + duration.value(roomHours() * 60, 'm'); }
+    function newRoom(d) {
+      return d.keys().hasOnly(['seats', 'names', 'chars', 'ready', 'mid', 'at'])
+        && d.keys().hasAll(['seats', 'names', 'chars', 'ready', 'mid', 'at'])
+        && d.seats == {'A': uid(), 'B': null}
+        && ab(d.names) && validName(d.names.A) && d.names.B == null
+        && d.chars == {'A': null, 'B': null} && d.ready == {'A': false, 'B': false}
+        && d.mid == null && d.at == now();
+    }
+    // 今の試合が終わっている（または無い）
+    function noLive(r) { return r.mid == null || get(matchPath(r.mid)).data.over != null; }
+    function keepSide(d, r, s) {
+      return d.seats[s] == r.seats[s] && d.names[s] == r.names[s] && d.chars[s] == r.chars[s] && d.ready[s] == r.ready[s];
+    }
+    function clearSide(d, s) {
+      return d.seats[s] == null && d.names[s] == null && d.chars[s] == null && d.ready[s] == false;
+    }
+    // 自分の座席：名前・キャラ・準備（準備はキャラを選んでから）
+    function ownSide(d, s) {
+      return d.seats[s] == uid() && validName(d.names[s])
+        && (d.chars[s] == null || d.chars[s] in roster())
+        && (d.ready[s] == false || (d.ready[s] == true && d.chars[s] in roster()));
+    }
+    function roomShape(r, d) {
+      return changed(['seats', 'names', 'chars', 'ready', 'mid', 'at'])
+        && ab(d.seats) && ab(d.names) && ab(d.chars) && ab(d.ready) && d.at == now();
+    }
+    // 空いた座席に座る（観戦者が対戦相手として参加するときも）
+    function joinAs(r, d, s) {
+      return r.seats[s] == null && r.seats[oppOf(s)] != uid()
+        && d.seats[s] == uid() && validName(d.names[s]) && d.chars[s] == null && d.ready[s] == false
+        && keepSide(d, r, oppOf(s)) && d.mid == r.mid;
+    }
+    // 座席の人：自分の分を変える・席を立つ（試合が終わっているとき）・戻らない相手を外す（試合が終わっているとき）
+    function seatAs(code, r, d, s) {
+      return r.seats[s] == uid() && (
+          (d.mid == r.mid
+            && (ownSide(d, s) || (clearSide(d, s) && noLive(r)))
+            && (keepSide(d, r, oppOf(s)) || (clearSide(d, oppOf(s)) && noLive(r))))
+          // 次の試合を始める：両者の準備がそろっていて、今の試合が終わっている。準備は戻す
+        || (d.mid != r.mid && d.mid is string && noLive(r)
+            && r.ready == {'A': true, 'B': true} && d.ready == {'A': false, 'B': false}
+            && d.seats == r.seats && d.names == r.names && d.chars == r.chars
+            && getAfter(matchPath(d.mid)).data.kind == 'room'
+            && getAfter(matchPath(d.mid)).data.room == code));
+    }
+    match /rooms/{code} {
+      allow get: if validRoomCode(code);
+      allow list: if false;
+      allow create: if request.auth != null && validRoomCode(code) && newRoom(request.resource.data);
+      allow update: if request.auth != null && validRoomCode(code) && (
+          // 期限切れのルームのコードは、新しいルームとして使い直せる
+          (!roomAlive(resource.data) && newRoom(request.resource.data))
+        || (roomAlive(resource.data) && roomShape(resource.data, request.resource.data) && (
+               joinAs(resource.data, request.resource.data, 'A') || joinAs(resource.data, request.resource.data, 'B')
+            || seatAs(code, resource.data, request.resource.data, 'A') || seatAs(code, resource.data, request.resource.data, 'B'))));
       allow delete: if false;
     }
   }

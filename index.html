@@ -140,6 +140,8 @@ input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .float.miss{color:var(--muted);font-size:16px}
 @keyframes floatUp{0%{transform:translate(-50%,8px);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-34px);opacity:0}}
 .predBar{font-family:var(--font-pixel);font-size:12.5px;color:var(--accent);text-align:center;margin-top:-6px}
+.onTimer{margin:0 0 -8px;font-family:var(--font-pixel);font-size:14px;color:var(--muted);text-align:right}
+.onTimer.low{color:var(--hp-low)}
 .predRow{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
 .vs{font-family:var(--font-pixel);font-size:12px;color:var(--muted);text-align:center;letter-spacing:.3em}
 
@@ -257,7 +259,7 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <button class="mode" id="mode-rogue" type="button"><span class="mt">ローグライト</span><span class="md" id="rogueDesc">階層を進み、勝つたびに強くなる。最上階のボスを倒せば踏破。</span></button>
       <button class="mode" id="mode-cpu" type="button"><span class="mt">CPUと対戦</span><span class="md">ひとりで遊ぶ。相手はランダムに決まります。</span></button>
       <button class="mode" id="mode-local" type="button"><span class="mt">2人で対戦</span><span class="md">同じ端末で、交代しながら技を選びます。</span></button>
-      <button class="mode" id="mode-online" type="button" disabled><span class="mt">オンライン対戦</span><span class="md" id="onlineDesc">接続を確認しています…</span></button>
+      <button class="mode" id="mode-online" type="button"><span class="mt">オンライン対戦</span><span class="md" id="onlineDesc">ランダムに相手を探すか、ルームコードで友達と対戦・観戦します。</span></button>
     </div>
     <ul class="rules">
       <li>技は同時に選び、速さが高い方から行動</li>
@@ -273,16 +275,39 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   <section id="online" class="screen" hidden>
     <div class="subhead"><h2>オンライン対戦</h2><button class="link" id="onBack" type="button">戻る</button></div>
-    <div id="onIdle" class="panel">
-      <div class="onRow">
-        <button class="btn primary" id="onCreate" type="button">ルームを作る</button>
-        <span class="muted">表示される招待URL（またはコード）をLINEなどで友達に送ってください</span>
+    <div id="onIdle" class="screen">
+      <div class="panel" id="onResumeBox" hidden>
+        <p style="margin:0" id="onResumeText"></p>
+        <div class="onRow"><button class="btn primary" id="onResume" type="button">対戦に戻る</button></div>
       </div>
-      <form id="onJoinForm" class="onRow">
-        <label for="onCode">コードで参加</label>
-        <input type="text" id="onCode" maxlength="8" autocomplete="off" spellcheck="false" placeholder="k7mq2">
-        <button class="btn" type="submit">参加</button>
-      </form>
+      <div class="panel rkNameBox">
+        <label for="onName">名前（1〜12文字）</label>
+        <input type="text" id="onName" maxlength="12" autocomplete="nickname" spellcheck="false">
+        <p class="muted" style="margin:0">対戦相手と観戦者に表示されます。本名ではなくニックネームにしてください。</p>
+        <p class="err" id="onNameErr" role="alert"></p>
+      </div>
+      <div class="panel">
+        <div class="onRow">
+          <button class="btn primary" id="onSearch" type="button">相手を探す</button>
+          <span class="muted">このページを開いている人の中から、対戦相手を自動で探します</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="onRow">
+          <button class="btn" id="onCreate" type="button">ルームを作る</button>
+          <span class="muted">表示される招待URL（またはコード）をLINEなどで友達に送ってください。観戦と勝敗予想もできます</span>
+        </div>
+        <form id="onJoinForm" class="onRow">
+          <label for="onCode">コードで参加</label>
+          <input type="text" id="onCode" maxlength="5" autocomplete="off" spellcheck="false" placeholder="k7mq2">
+          <button class="btn" type="submit">参加</button>
+        </form>
+      </div>
+    </div>
+    <div id="onSearchBox" class="panel" hidden>
+      <p style="margin:0" id="onSearchMsg"></p>
+      <div class="roster" id="onSearchRoster"></div>
+      <div class="onRow" id="onSearchBtns"></div>
     </div>
     <div id="onRole" class="panel" hidden>
       <h3 class="h3" style="margin:0">参加方法を選んでください</h3>
@@ -292,16 +317,17 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       </div>
       <p class="muted" id="roleSlotNote" style="margin:0"></p>
     </div>
-    <p class="note" id="onNote"></p>
+    <p class="note" id="onNote" role="status"></p>
     <div id="onLobby" class="screen" hidden>
       <div class="panel lobby">
         <div><span class="muted">ルームコード</span><div class="code" id="onCodeShow"></div></div>
-        <div class="onRow"><button class="btn" id="onCopy" type="button">コードをコピー</button><span id="onLinkRow"><button class="btn primary" id="onCopyLink" type="button">招待URLをコピー</button></span></div>
+        <div class="onRow"><button class="btn" id="onCopy" type="button">コードをコピー</button><button class="btn primary" id="onCopyLink" type="button">招待URLをコピー</button></div>
       </div>
       <dl class="lobbyStatus" id="onStatus"></dl>
       <div class="onRow" id="specJoinRow" hidden><button class="btn primary" id="specJoin" type="button">対戦相手として参加する</button><span class="muted">対戦枠が空いています</span></div>
       <p class="muted" id="specHint" style="margin:0" hidden>観戦者として参加中です。対戦が始まると自動で観戦画面に切り替わります。</p>
-      <h3 class="h3" id="rosterHead">あなたのキャラ</h3>
+      <button class="link" id="onKick" type="button" hidden>戻ってこない相手をルームから外す</button>
+      <h3 class="h3" id="rosterHead">あなたのキャラ（選ぶと準備完了）</h3>
       <div class="roster" id="onRoster"></div>
     </div>
   </section>
@@ -320,6 +346,7 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <div class="fighter player" id="fp"></div>
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
+    <p class="onTimer" id="onTimer" role="status" hidden></p>
     <p class="cmdHead" id="cmdHead"></p>
     <div class="cmds" id="cmds"></div>
     <button class="link" id="quit" type="button">モード選択に戻る</button>
@@ -335,7 +362,6 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 /* ================= キャラクター定義 ================= */
 const CHARS = [
@@ -588,6 +614,7 @@ let localStage = 'A', localPick = null, localP1 = null;
 let myPick = null;
 let playChain = Promise.resolve();
 let matchOver = null;
+let playGen = 0;          // 対戦を始め直す・抜けるたびに増やす（前の対戦の演出が残っていたら止める）
 
 function whoLabel(side){
   if(mode==='rogue') return side==='A' ? 'あなた' : RG_NODE[RB.node].foe;
@@ -616,6 +643,7 @@ function fighterHTML(side){
 }
 
 function beginMatch(st, bottom){
+  playGen++;
   ST = st; VIEW = clone(st); BOTTOM = bottom;
   busy = false; myPick = null; localStage = 'A'; localPick = null; lines = []; matchOver = null;
   $('fp').innerHTML = fighterHTML(bottom);
@@ -624,8 +652,9 @@ function beginMatch(st, bottom){
   drawSprite($('fe').querySelector('canvas'), unitOf(st[other(bottom)]), true);
   $('msg').innerHTML = '';
   $('result').hidden = true;
-  $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : 'ルームを出る') : mode==='rogue' ? '中断してモード選択へ（続きから再開できます）' : 'モード選択に戻る';
+  $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : '降参して退出する') : mode==='rogue' ? '中断してモード選択へ（続きから再開できます）' : 'モード選択に戻る';
   showScreen('battle');
+  if(mode==='online') onNameTags();
   renderBars(); renderCommands(); renderPredBar();
 }
 
@@ -675,15 +704,12 @@ function renderCommands(){
     }
     side = localStage==='B' ? 'B' : 'A';
   }
-  if(mode==='online' && !busy && myPick && myPick.turn===ST.turn){
-    head.textContent = '';
-    const oppReady = onlineOppReady();
-    cm.append(waitPanel(`<span class="dots">相手の選択を待っています</span>`,
-      `あなたの技：${unitOf(ST[BOTTOM]).skills[myPick.idx].name}${oppReady?'｜相手は選択済み':''}`));
-    return;
+  if(mode==='online'){
+    const p = onPlayerPanel();
+    if(p){ head.textContent = ''; cm.append(p); return; }
   }
   const f = ST[side], c = unitOf(f);
-  head.textContent = busy ? '' : (mode==='local' ? `${whoLabel(side)}（${c.name}）の技を選んでください` : `${c.name}の技を選んでください`);
+  head.textContent = busy ? '' : (mode==='local' ? `${whoLabel(side)}（${c.name}）の技を選んでください` : (mode==='online' && ON.pickErr) || `${c.name}の技を選んでください`);
   c.skills.forEach((s,i)=>{
     const b = document.createElement('button');
     b.className='cmd'; b.type='button'; b.id='cmd-'+i;
@@ -710,8 +736,9 @@ function anim(side, cls){
   setTimeout(()=>st.classList.remove(cls), 400);
 }
 
-async function playback(steps){
+async function playback(steps, gen){
   for(const step of steps){
+    if(gen!==playGen) return;
     const [text, fx, snap] = step;
     say(fmt(String(text)));
     if(Array.isArray(snap)){ VIEW = {turn:ST.turn, A:unpack(ST.A.id, snap[0]), B:unpack(ST.B.id, snap[1])}; }
@@ -736,11 +763,13 @@ function promptNext(){
 
 function queueResult(r){
   busy = true; renderCommands();
+  const gen = playGen;
   playChain = playChain.then(async ()=>{
-    await playback(r.steps);
+    await playback(r.steps, gen);
+    if(gen!==playGen) return;
     ST = r.state; VIEW = clone(ST); myPick = null;
     renderBars();
-    if(r.over){ matchOver = r.over; busy = true; renderCommands(); await sleep(600); showResult(r.over); }
+    if(r.over){ matchOver = r.over; busy = true; renderCommands(); await sleep(600); if(gen===playGen) showResult(r.over); }
     else { busy = false; promptNext(); renderCommands(); }
   });
 }
@@ -794,34 +823,14 @@ function showResult(over){
       {label:'キャラを選び直す', fn:()=>openPick('local')}]);
     return;
   }
-  const pi = (mode==='online') ? ON.predInfo : null;
-  const predNote = (pi && pi.mid===ON.mid && (pi.a+pi.b)>0) ? `観戦者の予想：${dispName('A')} ${pi.a}票 / ${dispName('B')} ${pi.b}票` : '';
-  if(mode==='online' && ON.role==='spec'){
-    const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${unitOf(ST[over]).name}の勝利！`;
-    const hit = ON.myPred ? (ON.myPred===over ? '予想的中！' : '予想はずれ…') : '';
-    setResult(hit || winner, hit==='予想はずれ…' ? 'small lose' : 'small', hit ? `${winner}｜${sub}` : sub, [
-      {label:'観戦を続ける', primary:true, fn:()=>{ $('result').hidden = true; renderCommands(); }},
-      {label:'ルームを出る', fn:()=>leaveOnline()}],
-      [predNote, '次の対戦が始まると自動で切り替わります'].filter(Boolean).join('｜'));
-    return;
-  }
+  if(mode==='online'){ onShowEnd(); return; }
   const me = BOTTOM;
   const t = over==='draw' ? '引き分け' : over===me ? '勝利！' : '敗北…';
   const cls = over===me ? '' : 'lose';
-  if(mode==='cpu'){
-    const pair = [ST.A.id, ST.B.id];
-    setResult(t, cls, sub, [
-      {label:'同じ組み合わせで再戦', primary:true, fn:()=>startOffline(...pair)},
-      {label:'キャラを選び直す', fn:()=>openPick('cpu')}]);
-  } else {
-    if(ON.role==='host'){
-      setResult(t, cls, sub, [
-        {label:'再戦する', primary:true, fn:hostRematch},
-        {label:'ルームを出る', fn:()=>leaveOnline()}], predNote);
-    } else {
-      setResult(t, cls, sub, [{label:'ルームを出る', fn:()=>leaveOnline()}], [predNote, 'ホストが「再戦する」を押すと自動で始まります'].filter(Boolean).join('｜'));
-    }
-  }
+  const pair = [ST.A.id, ST.B.id];
+  setResult(t, cls, sub, [
+    {label:'同じ組み合わせで再戦', primary:true, fn:()=>startOffline(...pair)},
+    {label:'キャラを選び直す', fn:()=>openPick('cpu')}]);
 }
 
 /* ================= オフライン（CPU / 同じ端末） ================= */
@@ -1395,7 +1404,7 @@ const RK_CONFIG = {
   appId: "1:243084106210:web:0563a291feeedb6bab81bb"
 };
 const RK_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
-const RK_VER = '2026-10-20b';                   // 記録に入れるゲームのバージョン（16文字以内）
+const RK_VER = '2026-10-20c';                   // 記録に入れるゲームのバージョン（16文字以内）
 const RK_NAME = 'taiman-senki:rogue-name';      // 前回入れた名前
 const RK_PENDING = 'taiman-senki:rank-pending'; // まだ送れていない記録 {v:1, list:[{id, name, char, floor, tries}]}
 const RK_TOP = 20, RK_TIMEOUT = 15000, RK_TRIES = 5, RK_KEEP = 10;
@@ -2024,421 +2033,678 @@ function rkResultBox(rank){
   return box;
 }
 
-/* ================= オンライン（PeerJS：ブラウザどうしを直接つなぐ） ================= */
-// ホストのブラウザが「ルーム」になる。参加者は「対戦相手（1人）」か「観戦者」を選ぶ。
-// 戦闘の計算はホスト側で行い、結果（演出ステップ＋確定状態）を全員へ送る。
-const PEER_PREFIX = 'taiman-senki-';
-const MAX_CLIENTS = 12;
+/* ================= オンライン（Firestore：対戦の状態をサーバーに置く。docs/オンライン対戦サーバー化.md） ================= */
+// 対戦の状態（キャラ・選んだ技・盤面・ターン・名前）は ranking/ と同じ Firestore に置く（ルールは ranking/firestore.rules）。
+// 戦闘の計算はプレイヤーのブラウザで行う。両者の技がそろったら、先に気づいた方が計算して書き込む（二重計算はトランザクションで防ぐ）。
+// 切断は常時の確認をせず、ターンの期限（サーバーの時刻で判定）までに技を選ばなければ不戦勝で扱う。
+const ON_TURN_SEC = 70;     // 1ターンの期限（秒）＝技を選ぶ時間＋演出の時間。ranking/firestore.rules の turnSec() と同じ値にする
+const ON_SHOW_SEC = 10;     // そのうち演出の分（技を選ぶ時間は ON_TURN_SEC − ON_SHOW_SEC）
+const ON_QUEUE_SEC = 60;    // ランダムマッチで相手を探す秒数（rules の queueSec()）
+const ON_HERE_SEC = 15;     // ランダムマッチで割り当てられた側が参加を確かめるまでの秒数（rules の hereSec()）
+const ON_LOOK_SEC = 10;     // 相手を待っている間に探し直す間隔
+const ON_ROOM_HOURS = 2;    // ルームは最後に動きがあってから2時間で期限切れ（rules の roomHours()）
+const ON_SAVE = 'taiman-senki:online';   // 参加中の試合・ルーム {v:1, kind, side, mid, room}（再読み込みから戻るため）
+const ON_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';   // ルームコード：見間違えやすい i/l/o/0/1 を除く
+const ON_CODE_RE = /^[a-hjkmnp-z2-9]{5}$/;
 const ON = {};
 function resetOnline(){
-  Object.assign(ON, {peer:null, conn:null, role:null, code:null, mid:null, myChar:null, oppChar:null,
-    oppPick:null, oppReadyTurn:null, played:new Set(), clients:new Map(), lastState:null, lastOver:null,
-    preds:new Map(), predOpen:false, lobby:{hostChar:null, oppChar:null, oppPresent:false, specCount:0},
-    predInfo:{a:0, b:0, open:false, mid:null}, picks:{turn:0, a:false, b:false}, specCount:0, myPred:null, welcome:null});
+  for(const f of Object.values(ON.unsub || {})) try{ f?.(); }catch(e){}
+  clearInterval(ON.search?.timer);
+  Object.assign(ON, {fb:null, role:null, kind:null, side:null, room:null, roomData:null, mid:null, m:null, lt:null,
+    ended:false, preds:{a:0, b:0}, myPred:null, unsub:{}, search:null, resolving:null, resolveWait:0, claimWait:0,
+    creating:false, pickErr:'', offline:false, toKey:null});
 }
 resetOnline();
+ON.myName = ''; ON.myChar = null;   // 名前・キャラは退出しても覚えておく（もう一度探すとき）
 
-const PEER_OK = typeof Peer !== 'undefined';
-if(PEER_OK){
-  $('mode-online').disabled = false;
-  $('onlineDesc').textContent = 'ルームコードやURLを送って、離れた友達と対戦・観戦します。';
-} else {
-  $('onlineDesc').textContent = '通信ライブラリを読み込めませんでした。インターネット接続を確認してください。';
+let onSkew = null;   // サーバーの時刻 − 端末の時刻（ミリ秒）の見積もり。自分が書いた直後のサーバーの時刻から求める
+const onNow = () => Date.now() + (onSkew ?? 0);
+const onMs = ts => ts?.toMillis ? ts.toMillis() : null;
+function onSeeServerTime(ts){
+  const t = onMs(ts); if(t===null) return;
+  const d = t - Date.now();   // 書き込みから受け取るまでの時間の分だけ小さく出るので、大きい方を採る
+  if(onSkew===null || d>onSkew) onSkew = d;
 }
-
-function randCode(){
-  const cs = 'abcdefghjkmnpqrstuvwxyz23456789'; let s='';
-  for(let i=0;i<5;i++) s += cs[Math.floor(Math.random()*cs.length)];
+// 匿名ログインまで済ませた Firebase（ランキング・引き継ぎコードと共通）
+async function onFb(){
+  if(ON.fb) return ON.fb;
+  const fb = await rkFirebase();
+  await fb.au.authStateReady();
+  if(!fb.au.currentUser) await fb.auth.signInAnonymously(fb.au);
+  return ON.fb = {...fb, uid:fb.au.currentUser.uid};
+}
+const onRef = (...path) => ON.fb.fs.doc(ON.fb.db, ...path);
+function note(t){ $('onNote').textContent = t; }
+const isSpec = () => ON.role==='spec';
+const onWhy = e => e?.code==='permission-denied' ? 'サーバーに受け付けてもらえませんでした'
+  : 'ネットにつながっていないか、サーバーに接続できませんでした';
+function randCode(){ return Array.from(crypto.getRandomValues(new Uint8Array(5)), x=>ON_CODE_CHARS[x%31]).join(''); }
+function inviteUrl(){ return location.origin + location.pathname + '?room=' + ON.room; }
+function onSaveNow(){ lsSet(ON_SAVE, ON.role==='player' ? {v:1, kind:ON.kind, side:ON.side, mid:ON.mid, room:ON.room} : null); }
+function onSaved(){
+  const s = lsGet(ON_SAVE);
+  if(!s || s.v!==1 || !['random','room'].includes(s.kind) || !['A','B'].includes(s.side)) return null;
+  if(s.kind==='room' ? !ON_CODE_RE.test(s.room) : typeof s.mid!=='string') return null;
   return s;
 }
-function note(t){ $('onNote').textContent = t; }
-const isHost = () => ON.role==='host';
-const isSpec = () => ON.role==='spec';
-function sendTo(conn, msg){ try{ if(conn && conn.open) conn.send(msg); }catch(e){} }
-function playerClient(){ for(const c of ON.clients.values()) if(c.role==='player') return c; return null; }
-function broadcast(msg){ for(const c of ON.clients.values()) sendTo(c.conn, msg); }
-// ホスト→対戦相手 / 参加者→ホスト
-function send(msg){ if(isHost()) sendTo(playerClient()?.conn, msg); else sendTo(ON.conn, msg); }
-function specCountNow(){ let n=0; for(const c of ON.clients.values()) if(c.role==='spec') n++; return n; }
-function inviteUrl(){ return location.origin + location.pathname + '?room=' + ON.code; }
-function onlineOppReady(){ return ON.oppReadyTurn===ST?.turn; }
-
-function lobbyInfo(){
-  const p = playerClient();
-  return {t:'lobby', hostChar:ON.myChar, oppChar:p?ON.oppChar:null, oppPresent:!!p, specCount:specCountNow()};
-}
-function predsMsg(){
-  let a=0, b=0;
-  for(const s of ON.preds.values()){ if(s==='A') a++; else if(s==='B') b++; }
-  return {t:'preds', mid:ON.mid, a, b, open:ON.predOpen};
-}
-function picksMsg(){
-  const turn = ST?.turn || 0;
-  return {t:'picks', mid:ON.mid, turn, a:!!(myPick && myPick.turn===turn), b:!!(ON.oppPick && ON.oppPick.turn===turn)};
-}
-// ホストが持っている状況を全員へ配る
-function hostSync(){
-  const l = lobbyInfo(), pm = predsMsg();
-  ON.lobby = l; ON.specCount = l.specCount; ON.predInfo = pm;
-  broadcast(l); broadcast(pm);
-  renderLobby(); renderPredBar();
+// 名前：ランキングと同じチェック（rkCheckName）。入れた名前は次回のために残す
+function onName(){
+  const c = rkCheckName($('onName').value);
+  if(c.error){ $('onNameErr').textContent = c.error; $('onName').focus(); return null; }
+  lsSet(RK_NAME, c.name); ON.myName = c.name;
+  return c.name;
 }
 
-function netErrorText(err){
-  const t = err?.type;
-  if(t==='peer-unavailable') return 'そのコードのルームが見つかりません。コードが正しいか、ホストがページを開いたままか確認してください。';
-  if(t==='network' || t==='server-error' || t==='socket-error' || t==='socket-closed') return '通信サーバーに接続できませんでした。少し待ってからもう一度お試しください。';
-  if(t==='browser-incompatible') return 'このブラウザはオンライン対戦に対応していません。Chrome や Safari の最新版でお試しください。';
-  return '接続できませんでした。もう一度お試しください。';
+// 対戦で使えるのは対戦用キャラ（CHARS）だけ。ローグライトの敵などが混ざった状態は受け付けない
+const isRosterId = id => CHARS.some(c=>c.id===id);
+function rosterState(st){ return isRosterId(st?.A?.id) && isRosterId(st?.B?.id) && !st.A.u && !st.B.u; }
+function onValidMatch(m){
+  return m && ['random','room'].includes(m.kind) && rosterState(m.st) && Number.isInteger(m.turn) && Number.isInteger(m.lt)
+    && m.p && m.names && m.chars && m.ready && m.here && typeof m.log==='string' && onMs(m.tt)!==null;
 }
+function newMatchDoc(kind, room, p, names, chars){
+  const {serverTimestamp} = ON.fb.fs;
+  return {kind, room, p, names, chars, st:initState(chars.A, chars.B), turn:1, ready:{A:0, B:0}, log:'[]', lt:0,
+    tt:serverTimestamp(), at:serverTimestamp(), over:null, end:null, here:{A:true, B:kind!=='random'}};
+}
+// 期限：ターンが始まったサーバーの時刻（tt）＋ON_TURN_SEC。技を選べる残り秒数は演出の分を除いた最大値で表示
+const onTurnEnd = m => onMs(m.tt) + ON_TURN_SEC*1000;
+const onPickLeft = m => Math.min(ON_TURN_SEC - ON_SHOW_SEC, Math.ceil((onTurnEnd(m) - onNow())/1000));
 
-/* ---------- ホスト側 ---------- */
-function hostCreate(attempt=0){
-  if(!PEER_OK) return;
-  note('ルームを作っています…');
-  const code = randCode();
-  const peer = new Peer(PEER_PREFIX + code);
-  peer.on('open', ()=>{
-    resetOnline(); Object.assign(ON, {peer, role:'host', code});
-    enterLobby();
-  });
-  peer.on('connection', conn=>{
-    conn.on('open', ()=>{
-      if(ON.peer!==peer) return;
-      if(ON.clients.size >= MAX_CLIENTS){ sendTo(conn, {t:'full'}); setTimeout(()=>conn.close(), 500); return; }
-      ON.clients.set(conn.peer, {conn, role:null});
-      sendTo(conn, {t:'welcome', slotFree:!playerClient()});
-      sendTo(conn, lobbyInfo());
+/* ---------- 試合を見る（プレイヤー・観戦者共通） ---------- */
+function onWatchMatch(mid){
+  ON.unsub.match?.(); ON.unsub.preds?.();
+  Object.assign(ON, {mid, m:null, lt:null, ended:false, preds:{a:0, b:0}, myPred:null, resolving:null, pickErr:''});
+  myPick = null;
+  const {fs, db} = ON.fb;
+  ON.unsub.match = fs.onSnapshot(fs.doc(db, 'matches', mid), {includeMetadataChanges:true},
+    snap=>onMatchSnap(mid, snap), ()=>{ if(ON.mid===mid) note('対戦の情報を読めませんでした。'); });
+  if(ON.kind==='room') ON.unsub.preds = fs.onSnapshot(fs.query(fs.collection(db, 'matches', mid, 'preds'), fs.limit(100)), snap=>{
+    if(ON.mid!==mid) return;
+    let a = 0, b = 0, mine = null;
+    snap.forEach(d=>{ const s = d.data().side; if(s==='A') a++; else if(s==='B') b++; if(d.id===ON.fb.uid) mine = s; });
+    ON.preds = {a, b}; if(mine) ON.myPred = mine;
+    renderPredBar();
+    if(isSpec() && ST && !$('battle').hidden) renderCommands();
+  }, ()=>{});
+}
+function onMatchSnap(mid, snap){
+  if(ON.mid!==mid) return;
+  ON.offline = snap.metadata.fromCache;
+  if(!snap.exists()) return;
+  const m = snap.data({serverTimestamps:'estimate'});
+  if(!onValidMatch(m)) return;
+  const prev = ON.m; ON.m = m;
+  if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites && prev && onMs(prev.tt)!==onMs(m.tt)) onSeeServerTime(m.tt);
+  if(ON.role==='player' && m.p[ON.side]!==ON.fb.uid) return;
+  if(ON.lt===null){
+    // 初めて見る試合。ルームで決着済みなら（前の試合）ロビーのまま
+    if(m.over && ON.kind==='room'){ ON.lt = m.lt; ON.ended = true; renderLobby(); onMaybeRoomMatch(); return; }
+    onBeginView(m, !prev);
+  } else if(m.lt===ON.lt+1){
+    ON.lt = m.lt;
+    let steps = [];
+    try{ steps = JSON.parse(m.log); }catch(e){}
+    if(m.over) ON.ended = true;
+    queueResult({steps:Array.isArray(steps) ? steps : [], state:clone(m.st), over:m.over && m.end==='ko' ? m.over : null});
+  } else if(m.lt>ON.lt+1){
+    // 通信が途切れていた間に2ターン以上進んだ：盤面だけ合わせる
+    ON.lt = m.lt;
+    const gen = playGen;
+    playChain = playChain.then(()=>{
+      if(gen!==playGen) return;
+      ST = clone(m.st); VIEW = clone(ST); myPick = null; busy = false;
+      say('通信が途切れていた間に対戦が進みました'); renderBars(); promptNext();
     });
-    conn.on('data', d=>hostOnData(conn, d));
-    conn.on('close', ()=>hostOnClose(conn));
-    conn.on('error', ()=>{});
-  });
-  peer.on('error', err=>{
-    if(err?.type==='unavailable-id' && attempt<3){ peer.destroy(); hostCreate(attempt+1); return; }
-    if(!ON.peer){ peer.destroy(); note(netErrorText(err)); }
-  });
+  }
+  if(m.over && !ON.ended){ ON.ended = true; playChain = playChain.then(()=>{ matchOver = m.over; busy = true; renderCommands(); onShowEnd(); }); }
+  onMaybeResolve(m);
+  if(!busy && ST && !$('battle').hidden) renderCommands();
+  renderPredBar(); onTick();
+}
+function onBeginView(m, first){
+  mode = 'online'; $('result').hidden = true;
+  playChain = Promise.resolve();
+  ON.lt = m.lt; ON.ended = !!m.over;
+  beginMatch(clone(m.st), ON.role==='player' ? ON.side : 'A');
+  // 自分が選び済み（再読み込みで戻った）なら、選んだ技を読み直して待つ表示に
+  if(ON.role==='player' && !m.over && m.ready[ON.side]===m.turn){
+    myPick = {turn:m.turn, idx:0, unknown:true};
+    ON.fb.fs.getDoc(onRef('matches', ON.mid, 'picks', ON.side)).then(s=>{
+      const p = s.data();
+      if(myPick?.unknown && p?.turn===m.turn && Number.isInteger(p.idx)){ myPick = {turn:p.turn, idx:p.idx}; if(!busy) renderCommands(); }
+    }).catch(()=>{});
+  }
+  const fresh = m.lt===0 && !m.over && onNow() - onMs(m.tt) < 15000;
+  if(m.over){ matchOver = m.over; busy = true; renderCommands(); say(isSpec() ? '観戦を開始しました' : '対戦に戻りました'); onShowEnd(); ON.ended = true; }
+  else if(fresh && first) queueResult({steps:[['{B}が挑戦してきた！',''],['対戦開始！','']], state:clone(m.st), over:null});
+  else { say(isSpec() ? '観戦を開始しました' : '対戦に戻りました'); promptNext(); }
+  if(!ON.tick) ON.tick = setInterval(onTick, 500);
+}
+// 演出が終わる前に次の更新が来ても順番に再生する（queueResult）。ここでは表示の残り時間と、期限切れ・計算の後押し
+function onTick(){
+  const tm = $('onTimer'), m = ON.m;
+  if(mode!=='online' || !m || !ST || $('battle').hidden){ tm.hidden = true; if(mode!=='online'){ clearInterval(ON.tick); ON.tick = null; } return; }
+  let text = '', low = false;
+  if(ON.offline) text = '通信が切れています（つながると自動で続きます）';
+  else if(m.over) text = '';
+  else if(m.kind==='random' && !m.here.B) text = '相手の参加を確かめています…';
+  else {
+    const left = onPickLeft(m);
+    text = left>0 ? `残り ${left}秒` : '時間切れ';
+    low = left<=10;
+  }
+  tm.textContent = text; tm.hidden = !text; tm.classList.toggle('low', low);
+  if(ON.role!=='player' || m.over || ON.offline) return;
+  onMaybeResolve(m);
+  // 期限を過ぎた：選んだ側の不戦勝（両者なしは引き分け）。サーバーの時計で判定されるので、早すぎたら少し待って出し直す
+  if(onNow() > onTurnEnd(m) + 1000 && Date.now() > ON.claimWait){
+    const s = ON.side, mine = m.ready[s]===m.turn, theirs = m.ready[other(s)]===m.turn;
+    const over = mine && !theirs ? s : !mine && !theirs ? 'draw' : null;
+    if(over){ ON.claimWait = Date.now() + 3000; ON.fb.fs.updateDoc(onRef('matches', ON.mid), {over, end:'timeout'}).catch(()=>{}); }
+  }
+  // ランダムマッチ：相手が参加を確かめないまま時間が過ぎたら、取り消して探し直す
+  if(m.kind==='random' && ON.side==='A' && !m.here.B && onNow() > onMs(m.at) + ON_HERE_SEC*1000 + 1000 && Date.now() > ON.claimWait){
+    ON.claimWait = Date.now() + 3000;
+    ON.fb.fs.updateDoc(onRef('matches', ON.mid), {over:'void', end:'cancel'}).catch(()=>{});
+  }
+  // 期限を過ぎたら技のボタンを閉じる（毎回描き直すと押した瞬間に消えるので、切り替わるときだけ）
+  const key = ON.mid+':'+m.turn;
+  if(!busy && onPickLeft(m)<=0 && ON.toKey!==key){ ON.toKey = key; renderCommands(); }
 }
 
-function hostOnData(conn, d){
-  if(!d || typeof d!=='object') return;
-  const c = ON.clients.get(conn.peer); if(!c) return;
-  if(d.t==='role'){
-    if(d.role==='player'){
-      if(playerClient() && c.role!=='player'){ sendTo(conn, {t:'roleDenied'}); return; }
-      c.role = 'player'; ON.oppChar = null; ON.preds.delete(conn.peer);
-      sendTo(conn, {t:'roleOk', role:'player'});
-      hostSync();
-    } else if(d.role==='spec'){
-      if(c.role==='player') return;
-      c.role = 'spec';
-      sendTo(conn, {t:'roleOk', role:'spec'});
-      if(ON.mid && ON.lastState) sendTo(conn, {t:'specState', mid:ON.mid, state:ON.lastState, over:ON.lastOver});
-      hostSync();
-      sendTo(conn, picksMsg());
-    }
-  } else if(d.t==='char' && c.role==='player'){
-    ON.oppChar = isRosterId(d.id) ? d.id : null;
-    hostSync(); maybeHostStart();
-  } else if(d.t==='pick' && c.role==='player'){
-    if(d.mid!==ON.mid) return;
-    ON.oppPick = {turn:Number(d.turn), idx:Number(d.idx)};
-    ON.oppReadyTurn = ON.oppPick.turn;
-    broadcast(picksMsg());
-    hostTryResolve();
-    if(!busy && !$('battle').hidden) renderCommands();
-  } else if(d.t==='predict' && c.role==='spec'){
-    if(!ON.predOpen || d.mid!==ON.mid || (d.side!=='A' && d.side!=='B')) return;
-    ON.preds.set(conn.peer, d.side);
-    hostSync();
-  } else if(d.t==='leave'){
-    conn.close();
+/* ---------- 技を選ぶ・ターンを計算する ---------- */
+async function onlineSubmitPick(i){
+  const m = ON.m, mid = ON.mid, t = ST.turn, s = ON.side;
+  if(!m || m.over || m.turn!==t || ON.role!=='player' || (myPick && myPick.turn===t)) return;
+  myPick = {turn:t, idx:i, sending:true}; ON.pickErr = '';
+  renderCommands();
+  const {fs, db} = ON.fb, b = fs.writeBatch(db);
+  b.set(fs.doc(db, 'matches', mid, 'picks', s), {turn:t, idx:i});
+  b.update(fs.doc(db, 'matches', mid), {['ready.'+s]:t});
+  try{ await b.commit(); if(myPick?.turn===t) myPick.sending = false; }
+  catch(e){
+    if(ON.mid!==mid || myPick?.turn!==t) return;
+    myPick = null;
+    ON.pickErr = e?.code==='permission-denied' ? '期限を過ぎたため、技を受け付けられませんでした。' : '技を送れませんでした。もう一度選んでください。';
+  }
+  if(!busy && ST && ST.turn===t) renderCommands();
+}
+// 両者の技がそろったら計算する。A はすぐ、B は少し待ってから（A がいれば A の結果を受け取るだけになる）。
+// 期限を過ぎていても計算できる（ルール）ので、戻ってきた方が続けられる
+function onMaybeResolve(m){
+  if(ON.role!=='player' || m.over || m.ready.A!==m.turn || m.ready.B!==m.turn) return;
+  const key = ON.mid+':'+m.turn;
+  if(ON.resolving===key || Date.now() < ON.resolveWait) return;
+  ON.resolving = key;
+  const mid = ON.mid, t = m.turn;
+  setTimeout(()=>{
+    onResolve(mid, t).catch(()=>{ ON.resolveWait = Date.now() + 3000; })
+      .finally(()=>{ if(ON.resolving===key) ON.resolving = null; });
+  }, ON.side==='A' ? 0 : 1500);
+}
+async function onResolve(mid, t){
+  if(ON.mid!==mid || !ON.m || ON.m.over || ON.m.turn!==t) return;
+  const {fs, db} = ON.fb, ref = fs.doc(db, 'matches', mid);
+  await rkTimeout(fs.runTransaction(db, async tx=>{
+    const m = (await tx.get(ref)).data();
+    if(!onValidMatch(m) || m.over || m.turn!==t) return;
+    const pa = (await tx.get(fs.doc(db, 'matches', mid, 'picks', 'A'))).data();
+    const pb = (await tx.get(fs.doc(db, 'matches', mid, 'picks', 'B'))).data();
+    if(pa?.turn!==t || pb?.turn!==t) return;
+    const st = clone(m.st);
+    // 使えない技（番号違い・MP不足）は基本技に（今までのホスト計算と同じ）
+    const idx = (s, p) => { const sk = unitOf(st[s]).skills[p.idx]; return Number.isInteger(p.idx) && sk && sk.cost<=st[s].mp ? p.idx : 0; };
+    const res = resolveTurn(st, {A:idx('A', pa), B:idx('B', pb)});
+    const ns = res.state;
+    for(const s of ['A','B']) ns[s].hp = Math.max(0, ns[s].hp);   // 倒れたあとの HP は 0 で保存（ルールの範囲チェック）
+    tx.update(ref, {st:ns, turn:ns.turn, log:JSON.stringify(res.steps), lt:t, tt:fs.serverTimestamp(),
+      over:res.over, end:res.over ? 'ko' : null});
+  }));
+}
+
+/* ---------- ランダムマッチ ---------- */
+function onOpenSearch(){
+  if(!onName()) return;
+  mode = 'online'; ON.kind = 'random';
+  showOnlinePanel('search');
+  $('onSearchMsg').textContent = '使うキャラを選ぶと、相手を探し始めます。';
+  $('onSearchRoster').hidden = false;
+  buildRoster($('onSearchRoster'), id=>onStartSearch(id));
+  onSearchBtns([{label:'やめる', fn:()=>onLeave(true)}]);
+  note('');
+}
+function onSearchBtns(list){
+  const box = $('onSearchBtns'); box.innerHTML = '';
+  list.forEach((b, i)=>{
+    const e = document.createElement('button'); e.type = 'button'; e.className = 'btn' + (b.primary ? ' primary' : '');
+    e.id = 'onSearchBtn' + i; e.textContent = b.label; e.addEventListener('click', b.fn); box.append(e);
+  });
+}
+async function onStartSearch(char, again){
+  ON.myChar = char; ON.kind = 'random'; ON.role = 'player';
+  $('onSearchRoster').hidden = true;
+  $('onSearchMsg').textContent = again ? '相手が応答しなかったので、探し直しています…' : '相手を探しています…';
+  onSearchBtns([{label:'やめる', fn:()=>onLeave(true)}]);
+  clearInterval(ON.search?.timer);
+  const search = ON.search = {t0:Date.now(), at:null, looking:false, lastLook:0, timer:null};
+  try{
+    const {fs, uid} = await rkTimeout(onFb());
+    if(ON.search!==search) return;
+    const me = onRef('queue', uid);
+    await rkTimeout(fs.setDoc(me, {name:ON.myName, char, at:fs.serverTimestamp(), mid:null}));
+    if(ON.search!==search) return;
+    ON.unsub.queue?.();
+    ON.unsub.queue = fs.onSnapshot(me, snap=>{
+      if(ON.search!==search) return;
+      const d = snap.data({serverTimestamps:'estimate'});
+      if(!d) return;
+      if(!search.at && !snap.metadata.hasPendingWrites){ search.at = d.at; onSeeServerTime(d.at); }
+      if(typeof d.mid==='string') onMatched(search, d.mid);
+    }, ()=>{});
+    search.timer = setInterval(()=>onSearchTick(search), 1000);
+  }catch(e){
+    if(ON.search!==search) return;
+    $('onSearchMsg').textContent = `相手を探せませんでした（${onWhy(e)}）。`;
+    onSearchBtns([{label:'もう一度探す', primary:true, fn:()=>onStartSearch(char)}, {label:'やめる', fn:()=>onLeave(true)}]);
   }
 }
-
-function hostOnClose(conn){
-  if(!ON.peer) return;
-  const c = ON.clients.get(conn.peer); if(!c) return;
-  ON.clients.delete(conn.peer); ON.preds.delete(conn.peer);
-  if(c.role==='player') opponentLeft();
-  else hostSync();
+function onSearchTick(search){
+  if(ON.search!==search) return;
+  const sec = Math.floor((Date.now() - search.t0)/1000);
+  $('onSearchMsg').textContent = `相手を探しています… ${sec}秒`;
+  if(sec>=ON_QUEUE_SEC){ onSearchTimeout(search); return; }
+  if(search.at && Date.now() - search.lastLook >= ON_LOOK_SEC*1000) onLook(search);
+}
+function onStopSearch(keepEntry){
+  const s = ON.search; if(!s) return;
+  clearInterval(s.timer); ON.search = null;
+  ON.unsub.queue?.(); ON.unsub.queue = null;
+  if(!keepEntry && ON.fb) ON.fb.fs.deleteDoc(onRef('queue', ON.fb.uid)).catch(()=>{});
+}
+function onSearchTimeout(search){
+  if(ON.search!==search) return;
+  onStopSearch();
+  const char = ON.myChar;
+  $('onSearchMsg').textContent = `${ON_QUEUE_SEC}秒探しましたが、相手が見つかりませんでした。CPUと対戦しますか？`;
+  onSearchBtns([
+    {label:'CPUと対戦する', primary:true, fn:()=>{ onLeave(true); mode = 'cpu'; const others = CHARS.filter(x=>x.id!==char); startOffline(char, others[Math.floor(Math.random()*others.length)].id); }},
+    {label:'もう一度探す', fn:()=>onStartSearch(char)},
+    {label:'やめる', fn:()=>onLeave(true)}]);
+}
+// 自分より先に待っている人がいれば、自分が試合を作る（後から来た側が作る決まり。同時に作り合わないため）
+async function onLook(search){
+  if(search.looking) return;
+  search.looking = true; search.lastLook = Date.now();
+  try{
+    const {fs, db, uid} = ON.fb;
+    const since = fs.Timestamp.fromMillis(onNow() - (ON_QUEUE_SEC - 2)*1000);
+    const snap = await rkTimeout(fs.getDocs(fs.query(fs.collection(db, 'queue'), fs.where('at', '>', since), fs.orderBy('at'), fs.limit(10))));
+    const mine = onMs(search.at);
+    const list = snap.docs.filter(d=>{
+      const q = d.data(), t = onMs(q.at);
+      return d.id!==uid && q.mid==null && isRosterId(q.char) && rkCheckName(q.name).name===q.name
+        && t!==null && (t<mine || (t===mine && d.id<uid));
+    });
+    for(const d of list){
+      if(ON.search!==search) return;
+      if(await onMatchWith(search, d.id).catch(()=>false)) return;
+    }
+  }catch(e){}
+  finally{ search.looking = false; }
+}
+async function onMatchWith(search, them){
+  const {fs, db, uid} = ON.fb, ref = fs.doc(fs.collection(db, 'matches')), me = onRef('queue', uid), tq = onRef('queue', them);
+  let made = false;
+  await rkTimeout(fs.runTransaction(db, async tx=>{
+    made = false;
+    const a = await tx.get(me), b = await tx.get(tq);
+    if(!a.exists() || a.data().mid!=null || !b.exists() || b.data().mid!=null) return;
+    const q = b.data();
+    tx.set(ref, newMatchDoc('random', null, {A:uid, B:them}, {A:ON.myName, B:q.name}, {A:ON.myChar, B:q.char}));
+    tx.update(tq, {mid:ref.id});
+    tx.delete(me);
+    made = true;
+  }));
+  if(!made || ON.search!==search) return false;
+  onStopSearch(true);
+  onEnterMatch(ref.id, 'A');
+  return true;
+}
+// 先に待っていた自分が割り当てられた：参加を確かめてから対戦へ
+async function onMatched(search, mid){
+  onStopSearch(true);
+  try{
+    await rkTimeout(ON.fb.fs.updateDoc(onRef('matches', mid), {'here.B':true}));
+    ON.fb.fs.deleteDoc(onRef('queue', ON.fb.uid)).catch(()=>{});
+    onEnterMatch(mid, 'B');
+  }catch(e){
+    // 間に合わなかった（相手が取り消した）：探し直す
+    if(ON.kind==='random' && !ON.mid) onStartSearch(ON.myChar, true);
+  }
+}
+function onEnterMatch(mid, side){
+  ON.role = 'player'; ON.side = side;
+  onWatchMatch(mid);
+  onSaveNow();
+  note('');
 }
 
-function maybeHostStart(){
-  if(!isHost() || ON.mid) return;
-  if(playerClient() && ON.myChar && CHAR[ON.oppChar]) hostStart();
+/* ---------- ルーム（友達と遊ぶ） ---------- */
+async function onCreateRoom(){
+  if(!onName()) return;
+  note('ルームを作っています…');
+  try{
+    const {fs, db, uid} = await rkTimeout(onFb());
+    let code = null;
+    for(let i=0; i<4 && !code; i++){
+      const c = randCode(), ref = fs.doc(db, 'rooms', c);
+      await rkTimeout(fs.runTransaction(db, async tx=>{
+        const s = await tx.get(ref);
+        if(s.exists() && onRoomAlive(s.data())) return;
+        tx.set(ref, {seats:{A:uid, B:null}, names:{A:ON.myName, B:null}, chars:{A:null, B:null},
+          ready:{A:false, B:false}, mid:null, at:fs.serverTimestamp()});
+        code = c;
+      }));
+    }
+    if(!code) throw new Error('busy');
+    resetRoomState(code, 'player', 'A');
+    enterLobby();
+  }catch(e){ note(`ルームを作れませんでした（${onWhy(e)}）。少し待ってからもう一度お試しください。`); }
 }
-function hostStart(){
+const onRoomAlive = r => onMs(r?.at)===null || onNow() <= onMs(r.at) + ON_ROOM_HOURS*3600e3;
+function resetRoomState(code, role, side){
   mode = 'online';
-  ON.mid = Math.random().toString(36).slice(2,10);
-  ON.played = new Set([ON.mid+':0']); ON.oppPick = null; ON.oppReadyTurn = null;
-  ON.preds = new Map(); ON.predOpen = true;
-  playChain = Promise.resolve();
-  const st = initState(ON.myChar, ON.oppChar);
-  ON.lastState = st; ON.lastOver = null;
-  const r = {mid:ON.mid, turn:0, steps:[['{B}が挑戦してきた！',''],['対戦開始！','']], state:st, over:null};
-  broadcast({t:'result', r});
-  beginMatch(st, 'A');
-  hostSync();
-  broadcast(picksMsg());
-  queueResult(r);
+  Object.assign(ON, {kind:'room', room:code, role, side});
+  onSaveNow();
+  onWatchRoom();
 }
-function hostRematch(){
-  if(!playerClient() || !CHAR[ON.oppChar]){ $('resNote').textContent = '対戦相手が見つかりません。'; return; }
-  hostStart();
+function onWatchRoom(){
+  ON.unsub.room?.();
+  const code = ON.room, {fs} = ON.fb;
+  ON.unsub.room = fs.onSnapshot(onRef('rooms', code), snap=>onRoomSnap(code, snap), ()=>{});
 }
-function hostTryResolve(){
-  if(!isHost() || !ON.mid || !ST || !myPick || !ON.oppPick) return;
-  const key = ON.mid+':'+ST.turn;
-  if(ON.played.has(key)) return;
-  if(myPick.mid!==ON.mid || myPick.turn!==ST.turn || ON.oppPick.turn!==ST.turn) return;
-  let gi = ON.oppPick.idx;
-  const sk = unitOf(ST.B).skills[gi];
-  if(!Number.isInteger(gi) || !sk || sk.cost > ST.B.mp) gi = 0;
-  ON.played.add(key);
-  if(ST.turn>=1) ON.predOpen = false;   // 予想は1ターン目の決着で締め切り
-  const res = resolveTurn(ST, {A:myPick.idx, B:gi});
-  const r = {mid:ON.mid, turn:ST.turn, steps:res.steps, state:res.state, over:res.over};
-  ON.lastState = res.state; ON.lastOver = res.over;
-  ON.oppPick = null; ON.oppReadyTurn = null;
-  broadcast({t:'result', r});
-  broadcast({t:'picks', mid:ON.mid, turn:res.state.turn, a:false, b:false});
-  hostSync();
-  queueResult(r);
+async function onJoinRoom(code, resume){
+  note('ルームに接続しています…');
+  try{
+    const {fs, uid} = await rkTimeout(onFb());
+    const snap = await rkTimeout(fs.getDoc(onRef('rooms', code)));
+    const r = snap.data();
+    if(!r || !onRoomAlive(r)){ note('そのコードのルームが見つかりません。コードが正しいか確かめてください（ルームは2時間動きがないと使えなくなります）。'); return; }
+    mode = 'online'; note('');
+    const mine = ['A','B'].find(s=>r.seats?.[s]===uid);
+    if(mine){ resetRoomState(code, 'player', mine); enterLobby(); return; }
+    if(resume){ lsSet(ON_SAVE, null); note('ルームの席が外れていました。もう一度参加してください。'); return; }
+    Object.assign(ON, {kind:'room', room:code, role:'pending', roomData:r});
+    onWatchRoom();
+    showRolePicker();
+  }catch(e){ note(`ルームに接続できませんでした（${onWhy(e)}）。`); }
 }
-
-function opponentLeft(){
-  const inMatch = !!ON.mid;
-  ON.mid = null; ON.oppChar = null; ON.oppPick = null; ON.oppReadyTurn = null;
-  ON.predOpen = false; ON.preds = new Map(); ON.lastState = null; ON.lastOver = null;
-  if(inMatch) broadcast({t:'matchAborted'});
-  hostSync();
-  if(inMatch && (!$('battle').hidden || !$('result').hidden)){
-    busy = true; renderCommands();
-    setResult('相手が退出しました', 'small', '', [
-      {label:'次の相手を待つ', primary:true, fn:backToLobby},
-      {label:'ルームを閉じる', fn:()=>leaveOnline()}],
-      specCountNow() ? '観戦中の人が対戦相手として参加することもできます' : '');
-  } else renderLobby();
-}
-function backToLobby(){
+// 空いている座席に座る（観戦者が対戦相手として参加するときも）
+async function onTakeSeat(){
+  if(!ON.myName && !onName()) return;
+  const {fs, db, uid} = ON.fb, ref = onRef('rooms', ON.room);
+  let side = null;
+  try{
+    await rkTimeout(fs.runTransaction(db, async tx=>{
+      side = null;
+      const r = (await tx.get(ref)).data();
+      if(!r || !onRoomAlive(r)) return;
+      side = ['A','B'].find(s=>r.seats[s]===uid) || null;
+      if(side) return;
+      const s = ['A','B'].find(x=>!r.seats[x]);
+      if(!s) return;
+      tx.update(ref, {['seats.'+s]:uid, ['names.'+s]:ON.myName, ['chars.'+s]:null, ['ready.'+s]:false, at:fs.serverTimestamp()});
+      side = s;
+    }));
+  }catch(e){ note(`参加できませんでした（${onWhy(e)}）。`); return; }
+  if(!side){ $('roleSlotNote').textContent = 'ひと足早く対戦枠が埋まりました。観戦で参加できます。'; note('対戦枠は埋まっています。'); renderLobby(); return; }
+  ON.role = 'player'; ON.side = side; ON.myPred = null;
+  onSaveNow();
   $('result').hidden = true; ST = null;
   enterLobby();
 }
-
-/* ---------- 参加者側（対戦相手・観戦者） ---------- */
-function guestJoin(code){
-  if(!PEER_OK) return;
-  note('ルームに接続しています…');
-  const peer = new Peer();
-  peer.on('open', ()=>{
-    resetOnline(); Object.assign(ON, {peer, role:'pending', code});
-    const conn = peer.connect(PEER_PREFIX + code, {reliable:true});
-    ON.conn = conn;
-    conn.on('data', onData);
-    conn.on('close', ()=>{ if(ON.conn===conn){ ON.conn = null; hostGone(); } });
-    conn.on('error', ()=>{});
-    setTimeout(()=>{ if(ON.peer===peer && !ON.welcome) note('接続に時間がかかっています。ネットワーク環境によってはつながらないことがあります。'); }, 12000);
-  });
-  peer.on('error', err=>{
-    if(!ON.welcome){ note(netErrorText(err)); try{ peer.destroy(); }catch(e){} resetOnline(); }
-  });
-}
-
-function onData(d){
-  if(!d || typeof d!=='object') return;
-  const inBattle = !$('battle').hidden;
-  switch(d.t){
-    case 'welcome':
-      ON.welcome = {slotFree:!!d.slotFree}; showRolePicker(); break;
-    case 'full':
-      leaveOnline(true); note('このルームは満員です。'); break;
-    case 'roleOk':
-      ON.role = d.role==='player' ? 'player' : 'spec';
-      if(ON.role==='player'){ ON.myPred = null; enterLobby(); } else enterSpecLobby();
-      break;
-    case 'roleDenied':
-      ON.welcome = {slotFree:false}; showRolePicker();
-      $('roleSlotNote').textContent = 'ひと足早く対戦枠が埋まりました。観戦で参加できます。';
-      break;
-    case 'lobby':
-      ON.lobby = d; ON.specCount = Number(d.specCount)||0;
-      if(ON.role==='player') ON.oppChar = d.hostChar;
-      if(ON.role==='pending' && ON.welcome){ ON.welcome.slotFree = !d.oppPresent; showRolePicker(); }
-      renderLobby(); renderPredBar();
-      if(isSpec() && inBattle) renderCommands();
-      break;
-    case 'preds':
-      ON.predInfo = d; renderPredBar();
-      if(isSpec() && inBattle) renderCommands();
-      break;
-    case 'picks':
-      ON.picks = d; if(isSpec() && inBattle) renderCommands(); break;
-    case 'ready':
-      if(ON.role==='player'){ ON.oppReadyTurn = Number(d.turn); if(!busy && inBattle) renderCommands(); }
-      break;
-    case 'specState':
-      if(isSpec() && d.state && rosterState(d.state)) specJoinMidway(d);
-      break;
-    case 'result': {
-      const r = d.r;
-      if(!r || typeof r.mid!=='string' || !validResult(r)) return;
-      if(ON.role!=='player' && !isSpec()) return;
-      if(r.mid!==ON.mid){ if(r.turn===0) followerStart(r); }
-      else followerApply(r);
-      break;
-    }
-    case 'matchAborted':
-      if(isSpec()) specAborted(); break;
-    case 'leave':
-      ON.conn?.close(); break;
+function onRoomSnap(code, snap){
+  if(ON.room!==code) return;
+  const r = snap.data();
+  if(!r) return;
+  ON.roomData = r;
+  if(ON.role==='player' && r.seats[ON.side]!==ON.fb.uid){
+    // 外された・ルームが期限切れで作り直された
+    const inMatch = ON.m && !ON.m.over;
+    if(!inMatch){ onLeave(true); note('ルームの席が外れました。'); return; }
   }
+  if(ON.role==='pending'){ showRolePicker(); return; }
+  if(r.mid && r.mid!==ON.mid) onWatchMatch(r.mid);
+  onMaybeRoomMatch();
+  renderLobby();
+  if(!$('result').hidden && ON.m?.over && ON.role==='player') onRematchNote();
+}
+// 両者の準備がそろい、今の試合が終わっていれば次の試合を作る（A はすぐ、B は少し待って）
+function onMaybeRoomMatch(){
+  const r = ON.roomData;
+  if(ON.role!=='player' || !r || !r.ready.A || !r.ready.B || !r.seats.A || !r.seats.B || ON.creating) return;
+  if(r.mid && !(ON.mid===r.mid && ON.m?.over)) return;
+  ON.creating = true;
+  setTimeout(()=>onCreateRoomMatch().catch(()=>{}).finally(()=>{ ON.creating = false; }), ON.side==='A' ? 0 : 1500);
+}
+async function onCreateRoomMatch(){
+  const {fs, db} = ON.fb, ref = onRef('rooms', ON.room), code = ON.room;
+  await rkTimeout(fs.runTransaction(db, async tx=>{
+    const r = (await tx.get(ref)).data();
+    if(!r || !r.ready.A || !r.ready.B || !r.seats.A || !r.seats.B || !isRosterId(r.chars.A) || !isRosterId(r.chars.B)) return;
+    if(r.mid){ const m = (await tx.get(fs.doc(db, 'matches', r.mid))).data(); if(m && m.over==null) return; }
+    const mref = fs.doc(fs.collection(db, 'matches'));
+    tx.set(mref, newMatchDoc('room', code, r.seats, r.names, r.chars));
+    tx.update(ref, {mid:mref.id, ready:{A:false, B:false}, at:fs.serverTimestamp()});
+  }));
+}
+function onRoomUpdate(patch){
+  const {fs} = ON.fb;
+  return rkTimeout(fs.updateDoc(onRef('rooms', ON.room), {...patch, at:fs.serverTimestamp()}))
+    .catch(e=>{ note(`ルームを更新できませんでした（${onWhy(e)}）。`); throw e; });
+}
+const onLive = () => !!(ON.mid && ON.m && !ON.m.over);
+function onRematch(){
+  const s = ON.side;
+  onRoomUpdate({['ready.'+s]:true}).then(onRematchNote).catch(()=>{});
+}
+function onRematchNote(){
+  const r = ON.roomData; if(!r) return;
+  const o = other(ON.side);
+  $('resNote').textContent = !r.seats[o] ? '相手がルームを出ました。'
+    : r.ready[ON.side] ? (r.ready[o] ? 'まもなく再戦が始まります' : '相手の準備を待っています…')
+    : r.ready[o] ? '相手は再戦を希望しています' : '';
+}
+function onKick(){
+  const o = other(ON.side);
+  askConfirm('相手をルームから外しますか？', '戻ってこない相手の席を空けて、別の人が参加できるようにします。', '外す', ()=>{
+    onRoomUpdate({['seats.'+o]:null, ['names.'+o]:null, ['chars.'+o]:null, ['ready.'+o]:false}).catch(()=>{});
+  });
 }
 
-function validResult(r){
-  return r.state && rosterState(r.state) && Array.isArray(r.steps) && Number.isInteger(r.turn);
+/* ---------- 退出・復帰 ---------- */
+// 対戦中のプレイヤーが出るときは降参（相手の勝ち）。ルームの席を空け、待ち行列から外れる
+function onLeave(stayOnOnlineScreen){
+  const fb = ON.fb, wasLive = ON.role==='player' && onLive(), mid = ON.mid, side = ON.side, room = ON.room, role = ON.role;
+  onStopSearch();
+  if(fb){
+    const {fs} = fb;
+    let p = Promise.resolve();
+    if(wasLive) p = fs.updateDoc(fs.doc(fb.db, 'matches', mid), {over:other(side), end:'left'}).catch(()=>{});
+    if(room && role==='player') p.then(()=>fs.updateDoc(fs.doc(fb.db, 'rooms', room),
+      {['seats.'+side]:null, ['names.'+side]:null, ['chars.'+side]:null, ['ready.'+side]:false, at:fs.serverTimestamp()})).catch(()=>{});
+  }
+  lsSet(ON_SAVE, null);
+  resetOnline();
+  ON.fb = fb;
+  playGen++;
+  $('result').hidden = true; ST = null; matchOver = null;
+  if(stayOnOnlineScreen){ mode = 'online'; showOnlinePanel('idle'); showScreen('online'); }
+  else { mode = null; showScreen('home'); }
 }
-// 対戦で使えるのは対戦用キャラ（CHARS）だけ。ローグライトの敵などが混ざった状態は受け付けない
-const isRosterId = id => CHARS.some(c=>c.id===id);
-function rosterState(st){ return isRosterId(st.A?.id) && isRosterId(st.B?.id) && !st.A.u && !st.B.u; }
+// ページを開いたとき：前回の試合・ルームが続いていれば「対戦に戻る」を出す（SDK は保存があるときだけ読む）
+async function onCheckResume(){
+  const s = onSaved(); if(!s) return;
+  try{
+    const {fs, uid} = await rkTimeout(onFb());
+    let ok = false;
+    if(s.kind==='room'){
+      const r = (await rkTimeout(fs.getDoc(onRef('rooms', s.room)))).data();
+      ok = r && onRoomAlive(r) && r.seats?.[s.side]===uid;
+    } else {
+      const m = (await rkTimeout(fs.getDoc(onRef('matches', s.mid)))).data();
+      ok = onValidMatch(m) && !m.over && m.p[s.side]===uid;
+    }
+    if(!ok){ lsSet(ON_SAVE, null); return; }
+    $('onResumeText').textContent = s.kind==='room' ? `ルーム ${s.room} に参加中です。` : '対戦の途中です。期限までに戻らないと負けになります。';
+    $('onResume').textContent = s.kind==='room' ? 'ルームに戻る' : '対戦に戻る';
+    $('onResumeBox').hidden = false;
+    $('onlineDesc').textContent = '対戦の途中です（押すと戻れます）。';
+  }catch(e){}
+}
+function onResume(){
+  const s = onSaved(); if(!s) return;
+  $('onResumeBox').hidden = true;
+  $('onlineDesc').textContent = 'ランダムに相手を探すか、ルームコードで友達と対戦・観戦します。';
+  if(s.kind==='room'){ onJoinRoom(s.room, true); return; }
+  mode = 'online'; ON.kind = 'random';
+  onEnterMatch(s.mid, s.side);
+  note('対戦に戻っています…');
+}
 
-function followerStart(r){
-  mode = 'online';
-  ON.mid = r.mid; ON.played = new Set([r.mid+':0']); ON.oppReadyTurn = null; ON.myPred = null;
-  ON.picks = {mid:r.mid, turn:1, a:false, b:false};
-  playChain = Promise.resolve();
-  beginMatch(clone(r.state), isSpec() ? 'A' : 'B');
-  queueResult(r);
-}
-function followerApply(r){
-  const key = r.mid+':'+r.turn;
-  if(ON.played.has(key) || r.turn===0) return;
-  ON.played.add(key); ON.oppReadyTurn = null;
-  queueResult(r);
-}
-function specJoinMidway(d){
-  mode = 'online';
-  ON.mid = d.mid; ON.played = new Set(); ON.myPred = null;
-  playChain = Promise.resolve();
-  beginMatch(clone(d.state), 'A');
-  say('観戦を開始しました');
-  if(d.over){ matchOver = d.over; busy = true; renderCommands(); showResult(d.over); }
-  else promptNext();
-}
-function specAborted(){
-  ON.mid = null; busy = true; renderCommands();
-  setResult('対戦相手が退出しました', 'small', '', [
-    {label:'ロビーで待つ', primary:true, fn:()=>{ $('result').hidden = true; ST = null; enterSpecLobby(); }},
-    {label:'ルームを出る', fn:()=>leaveOnline()}],
-    '対戦枠が空いたので、ロビーから対戦相手として参加することもできます');
-}
-function hostGone(){
-  if(!ON.peer) return;
-  if(!$('battle').hidden || !$('result').hidden){
-    busy = true; renderCommands();
-    setResult('接続が切れました', 'small', 'ホストがルームを閉じたか、通信が途切れました。', [{label:'モード選択に戻る', primary:true, fn:()=>leaveOnline()}]);
-  } else { leaveOnline(true); note('ホストとの接続が切れました。'); }
-}
-
-function onlineSubmitPick(i){
-  myPick = {mid:ON.mid, turn:ST.turn, idx:i};
-  if(isHost()){ send({t:'ready', turn:ST.turn}); broadcast(picksMsg()); hostTryResolve(); }
-  else send({t:'pick', mid:ON.mid, turn:ST.turn, idx:i});
+/* ---------- 結果 ---------- */
+function onShowEnd(){
+  const m = ON.m; if(!m || !m.over) return;
+  const over = m.over, end = m.end, me = ON.side;
+  const nm = s => `${m.names[s]}（${CHAR[m.chars[s]].name}）`;
+  const leave = {label: ON.kind==='room' ? 'ルームを出る' : 'モード選択に戻る', fn:()=>onLeave()};
+  if(over==='void'){
+    // ランダムマッチの取り消し（相手が参加を確かめなかった）：探し直す
+    $('result').hidden = true;
+    if(ON.role==='player' && ON.kind==='random'){ const c = m.chars[me]; onLeave(true); showOnlinePanel('search'); onStartSearch(c, true); }
+    return;
+  }
+  const loser = over==='draw' ? null : other(over);
+  const why = end==='timeout' ? (over==='draw' ? '両者とも時間内に技を選ばなかったため、引き分け'
+      : isSpec() ? `${m.names[loser]}が時間内に技を選ばなかったため、${m.names[over]}の不戦勝`
+      : over===me ? '相手が時間内に技を選ばなかったため、不戦勝' : '時間内に技を選ばなかったため、負け')
+    : end==='left' ? (isSpec() ? `${m.names[loser]}が対戦をやめました（降参）` : over===me ? '相手が対戦をやめました（降参）' : '降参しました')
+    : `${ST?.turn ?? m.turn}ターンで決着`;
+  const sub = `${nm('A')} vs ${nm('B')}｜${why}`;
+  const pv = ON.preds, predNote = m.kind==='room' && (pv.a+pv.b)>0 ? `観戦者の予想：${m.names.A} ${pv.a}票 / ${m.names.B} ${pv.b}票` : '';
+  if(isSpec()){
+    const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${m.names[over]}の勝利！`;
+    const hit = ON.myPred ? (ON.myPred===over ? '予想的中！' : '予想はずれ…') : '';
+    setResult(hit || winner, hit==='予想はずれ…' ? 'small lose' : 'small', hit ? `${winner}｜${sub}` : sub, [
+      {label:'観戦を続ける', primary:true, fn:()=>{ $('result').hidden = true; renderCommands(); }},
+      {label:'ルームを出る', fn:()=>onLeave()}],
+      [predNote, '次の対戦が始まると自動で切り替わります'].filter(Boolean).join('｜'));
+    return;
+  }
+  lsSet(ON_SAVE, ON.kind==='room' ? {v:1, kind:'room', side:me, mid:null, room:ON.room} : null);
+  const t = over==='draw' ? '引き分け' : over===me ? '勝利！' : '敗北…';
+  const cls = over===me || over==='draw' ? '' : 'lose';
+  if(ON.kind==='random'){
+    const c = m.chars[me];
+    setResult(t, cls, sub, [
+      {label:'もう一度相手を探す', primary:true, fn:()=>{ onLeave(true); showOnlinePanel('search'); onStartSearch(c); }},
+      leave]);
+  } else {
+    setResult(t, cls, sub, [
+      {label:'再戦する', primary:true, fn:onRematch},
+      {label:'キャラを選び直す', fn:()=>{ $('result').hidden = true; ST = null; enterLobby(); }},
+      leave], predNote);
+    onRematchNote();
+    if(predNote) $('resNote').textContent = [predNote, $('resNote').textContent].filter(Boolean).join('｜');
+  }
 }
 
 /* ---------- 画面 ---------- */
 function showOnlinePanel(which){
   $('onIdle').hidden = which!=='idle';
+  $('onSearchBox').hidden = which!=='search';
   $('onRole').hidden = which!=='role';
   $('onLobby').hidden = which!=='lobby';
+  if(which==='idle'){ $('onName').value = $('onName').value || rkSavedName(); $('onNameErr').textContent = ''; }
 }
 function showRolePicker(){
   mode = 'online';
   showOnlinePanel('role');
-  const free = !!ON.welcome?.slotFree;
+  const r = ON.roomData, free = !!r && (!r.seats.A || !r.seats.B);
   $('rolePlayer').disabled = !free;
-  $('roleSlotNote').textContent = free ? '対戦相手は1人まで。観戦は何人でも参加できます。' : '対戦枠は埋まっています。観戦で参加できます。';
-  note('');
+  $('roleSlotNote').textContent = free ? '対戦は2人まで。観戦は何人でも参加できます（観戦者は勝敗予想ができます）。' : '対戦枠は埋まっています。観戦で参加できます。';
   showScreen('online');
 }
 function enterLobby(){
   mode = 'online';
   showOnlinePanel('lobby');
-  $('onCodeShow').textContent = ON.code;
-  $('onLinkRow').hidden = !isHost();
+  $('onCodeShow').textContent = ON.room;
   $('rosterHead').hidden = false; $('onRoster').hidden = false; $('specHint').hidden = true;
   buildRoster($('onRoster'), id=>{
-    ON.myChar = id; markSelected($('onRoster'), id);
-    if(isHost()){ hostSync(); maybeHostStart(); }
-    else { send({t:'char', id}); renderLobby(); }
+    markSelected($('onRoster'), id);
+    onRoomUpdate({['chars.'+ON.side]:id, ['ready.'+ON.side]:true}).catch(()=>{});
   });
-  if(ON.myChar) markSelected($('onRoster'), ON.myChar);
+  const c = ON.roomData?.chars?.[ON.side];
+  if(c) markSelected($('onRoster'), c);
   note(''); showScreen('online'); renderLobby();
 }
 function enterSpecLobby(){
-  mode = 'online';
+  mode = 'online'; ON.role = 'spec';
   showOnlinePanel('lobby');
-  $('onCodeShow').textContent = ON.code;
-  $('onLinkRow').hidden = true;
+  $('onCodeShow').textContent = ON.room;
   $('rosterHead').hidden = true; $('onRoster').hidden = true; $('specHint').hidden = false;
   note(''); showScreen('online'); renderLobby();
+  const r = ON.roomData;
+  if(r?.mid && r.mid!==ON.mid) onWatchMatch(r.mid);
 }
 function renderLobby(){
-  const dl = $('onStatus');
-  if(!ON.peer || $('onLobby').hidden) return;
+  const dl = $('onStatus'), r = ON.roomData;
+  if(!r || $('onLobby').hidden) return;
   const nm = id => CHAR[id] ? `${CHAR[id].name}（${CHAR[id].role}）` : null;
-  let items, both;
-  if(isHost()){
-    const p = playerClient();
-    items = [['あなた', `ホスト・${nm(ON.myChar)||'キャラ未選択'}`], ['対戦相手', p ? (nm(ON.oppChar)||'参加済み・キャラ選択中') : '参加を待っています…']];
-    both = ON.myChar && p && CHAR[ON.oppChar];
-  } else if(ON.role==='player'){
-    items = [['あなた', `対戦相手・${nm(ON.myChar)||'キャラ未選択'}`], ['ホスト', nm(ON.lobby.hostChar)||'キャラ選択中']];
-    both = ON.myChar && CHAR[ON.lobby.hostChar];
-  } else {
-    items = [['1P（ホスト）', nm(ON.lobby.hostChar)||'キャラ選択中'],
-             ['2P', ON.lobby.oppPresent ? (nm(ON.lobby.oppChar)||'参加済み・キャラ選択中') : '参加を待っています…'],
-             ['あなた', '観戦者']];
-    both = CHAR[ON.lobby.hostChar] && CHAR[ON.lobby.oppChar];
-  }
-  items.push(['観戦', `${ON.specCount}人`]);
+  const seat = s => !r.seats[s] ? '参加を待っています…'
+    : `${r.names[s]}・${nm(r.chars[s]) || 'キャラ選択中'}${r.chars[s] && r.ready[s] ? '・準備OK' : r.chars[s] ? '・準備中' : ''}`;
+  const items = [['1P', seat('A')], ['2P', seat('B')],
+    ['あなた', ON.role==='player' ? (ON.side==='A' ? '1P' : '2P') : '観戦者']];
+  const live = onLive();
+  if(live) items.push(['状況', '対戦中']);
+  const both = !live && r.seats.A && r.seats.B && r.ready.A && r.ready.B;
   dl.innerHTML = items.map(()=>'<dt></dt><dd></dd>').join('') + (both ? '<div class="hint">まもなく対戦が始まります</div>' : '');
   dl.querySelectorAll('dt').forEach((e,i)=>e.textContent = items[i][0]);
   dl.querySelectorAll('dd').forEach((e,i)=>e.textContent = items[i][1]);
-  $('specJoinRow').hidden = !(isSpec() && !ON.lobby.oppPresent);
-}
-function predText(){
-  const pi = ON.predInfo;
-  if(!ST || !pi || pi.mid!==ON.mid || (pi.a+pi.b)===0) return '';
-  return `勝敗予想 ${dispName('A')} ${pi.a} : ${pi.b} ${dispName('B')}`;
+  $('specJoinRow').hidden = !(isSpec() && (!r.seats.A || !r.seats.B));
+  $('onKick').hidden = !(ON.role==='player' && r.seats[other(ON.side)] && !live);
 }
 function renderPredBar(){
-  const el = $('predBar');
-  if(mode!=='online' || !ON.mid || !ST){ el.hidden = true; return; }
-  const n = ON.specCount, pt = predText(), open = ON.predInfo?.open && ON.predInfo?.mid===ON.mid;
-  if(!n && !pt){ el.hidden = true; return; }
-  el.textContent = [`観戦 ${n}人`, pt, open ? '予想受付中' : ''].filter(Boolean).join('｜');
+  const el = $('predBar'), m = ON.m;
+  if(mode!=='online' || !m || !ST || m.kind!=='room'){ el.hidden = true; return; }
+  const {a, b} = ON.preds, open = m.turn===1 && !m.over;
+  if(!(a+b) && !open){ el.hidden = true; return; }
+  el.textContent = [`勝敗予想 ${m.names.A} ${a} : ${b} ${m.names.B}`, open ? '予想受付中' : ''].filter(Boolean).join('｜');
   el.hidden = false;
 }
 function specPanel(){
   const d = document.createElement('div'); d.className = 'waitPanel';
-  const nameOf = s => `${whoLabel(s)} ${unitOf(ST[s]).name}`;
-  const pi = ON.predInfo || {};
-  if(!matchOver && pi.open && pi.mid===ON.mid && !ON.myPred){
+  const m = ON.m;
+  const nameOf = s => `${whoLabel(s)} ${m.names[s]}（${unitOf(ST[s]).name}）`;
+  if(!matchOver && m.kind==='room' && m.turn===1 && !m.over && !ON.myPred){
     d.innerHTML = '<p>どちらが勝つと思う？</p><small>1ターン目が終わるまで予想できます</small>';
     const row = document.createElement('div'); row.className = 'predRow';
     ['A','B'].forEach(s=>{
       const b = document.createElement('button'); b.type='button'; b.className='btn'; b.id='pred-'+s;
       b.textContent = nameOf(s);
-      b.addEventListener('click', ()=>{ ON.myPred = s; send({t:'predict', mid:ON.mid, side:s}); renderCommands(); });
+      b.addEventListener('click', ()=>{
+        ON.myPred = s; renderCommands();
+        ON.fb.fs.setDoc(onRef('matches', ON.mid, 'preds', ON.fb.uid), {side:s})
+          .catch(()=>{ if(ON.myPred===s){ ON.myPred = null; renderCommands(); } });
+      });
       row.append(b);
     });
     d.append(row);
     return d;
   }
-  const pk = ON.picks || {};
-  const turnOk = pk.mid===ON.mid && pk.turn===ST.turn;
-  const st = s => (turnOk && pk[s==='A'?'a':'b']) ? '選択済み' : '考え中…';
+  const turnOk = m.turn===ST.turn;
+  const st = s => (turnOk && m.ready[s]===m.turn) ? '選択済み' : '考え中…';
   let main, sub;
   if(matchOver){ main = '決着しました'; sub = '次の対戦が始まると自動で切り替わります'; }
   else if(busy){ main = '行動中…'; sub = ''; }
@@ -2449,26 +2715,36 @@ function specPanel(){
   d.querySelector('small').textContent = sub;
   return d;
 }
-
-function resetOnlineScreens(){ showOnlinePanel('idle'); }
-function leaveOnline(stayOnOnlineScreen){
-  if(isHost()) broadcast({t:'leave'}); else send({t:'leave'});
-  const p = ON.peer, conns = [ON.conn, ...[...ON.clients.values()].map(c=>c.conn)];
-  resetOnline();
-  conns.forEach(c=>{ try{ c?.close(); }catch(e){} });
-  setTimeout(()=>{ try{ p?.destroy(); }catch(e){} }, 300);
-  $('result').hidden = true; ST = null;
-  if(stayOnOnlineScreen){ resetOnlineScreens(); showScreen('online'); }
-  else { mode = null; showScreen('home'); }
+// 戦闘画面の名前（プレイヤーの名前は必ず文字として入れる）
+function onNameTags(){
+  const m = ON.m; if(!m) return;
+  for(const s of ['A','B']){
+    const tag = elOf(s).querySelector('.tag');
+    if(tag) tag.textContent = `${unitOf(ST[s]).role}・${whoLabel(s)}｜${m.names[s]}`;
+  }
 }
-window.addEventListener('pagehide', ()=>{ if(isHost()) broadcast({t:'leave'}); else send({t:'leave'}); });
+// 自分の番の表示（選んだ後・時間切れ・相手の参加待ち）。null なら技のボタンを出す
+function onPlayerPanel(){
+  const m = ON.m; if(!m || busy) return null;
+  const o = other(BOTTOM), oppReady = m.ready[o]===ST.turn;
+  if(m.kind==='random' && !m.here.B) return waitPanel('<span class="dots">相手の参加を確かめています</span>', '');
+  if(myPick && myPick.turn===ST.turn){
+    const sk = myPick.unknown ? '' : `あなたの技：${unitOf(ST[BOTTOM]).skills[myPick.idx].name}`;
+    return waitPanel(myPick.sending ? '<span class="dots">送信中</span>' : '<span class="dots">相手の選択を待っています</span>',
+      [sk, oppReady ? '相手は選択済み' : ''].filter(Boolean).join('｜'));
+  }
+  if(!m.over && onPickLeft(m)<=0) return waitPanel('時間切れです', oppReady ? '相手の画面で決着します' : '');
+  return null;
+}
+
+window.addEventListener('pagehide', ()=>{ if(ON.search && ON.fb) ON.fb.fs.deleteDoc(onRef('queue', ON.fb.uid)).catch(()=>{}); });
 
 /* ================= イベント ================= */
 $('mode-rogue').addEventListener('click', ()=>rgShowDiffs());
 $('mode-cpu').addEventListener('click', ()=>openPick('cpu'));
 $('mode-local').addEventListener('click', ()=>openPick('local'));
 $('mode-online').addEventListener('click', ()=>{
-  mode = 'online'; resetOnlineScreens(); note('');
+  mode = 'online'; showOnlinePanel('idle'); note('');
   showScreen('online');
 });
 $('rgBack').addEventListener('click', ()=>rgBackFn && rgBackFn());
@@ -2476,39 +2752,52 @@ $('rgInApp').querySelector('p').textContent = RG_INAPP_TEXT;
 $('rgInAppClose').addEventListener('click', ()=>{ lsSet(RG_INAPP_HIDE, true); $('rgInApp').hidden = true; });
 refreshRogueMode();
 $('pickBack').addEventListener('click', ()=>{ mode=null; showScreen('home'); });
-$('onBack').addEventListener('click', ()=>{ if(ON.peer) leaveOnline(); else { mode=null; showScreen('home'); } });
-$('onCreate').addEventListener('click', ()=>hostCreate());
+$('onBack').addEventListener('click', ()=>{
+  if(!$('onIdle').hidden){ onStopSearch(); mode = null; showScreen('home'); }
+  else onLeave(true);
+});
+$('onName').addEventListener('input', ()=>{ $('onNameErr').textContent = ''; });
+$('onSearch').addEventListener('click', ()=>onOpenSearch());
+$('onCreate').addEventListener('click', ()=>onCreateRoom());
 $('onJoinForm').addEventListener('submit', e=>{
   e.preventDefault();
   const code = $('onCode').value.trim().toLowerCase();
-  if(!/^[a-z0-9]{4,8}$/.test(code)){ note('コードは英数字で入力してください（例：k7mq2）'); return; }
-  guestJoin(code);
+  if(!ON_CODE_RE.test(code)){ note('コードは5文字の英数字で入力してください（例：k7mq2）'); return; }
+  if(!onName()) return;
+  onJoinRoom(code);
 });
-$('rolePlayer').addEventListener('click', ()=>send({t:'role', role:'player'}));
-$('roleSpec').addEventListener('click', ()=>send({t:'role', role:'spec'}));
-$('specJoin').addEventListener('click', ()=>send({t:'role', role:'player'}));
+$('rolePlayer').addEventListener('click', ()=>onTakeSeat());
+$('roleSpec').addEventListener('click', ()=>enterSpecLobby());
+$('specJoin').addEventListener('click', ()=>onTakeSeat());
+$('onKick').addEventListener('click', ()=>onKick());
+$('onResume').addEventListener('click', ()=>onResume());
 function copyText(text, btn, label){
   const done = ()=>{ btn.textContent='コピーしました'; setTimeout(()=>btn.textContent=label, 1500); };
   if(navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>window.prompt('コピーしてください', text));
   else window.prompt('コピーしてください', text);
 }
-$('onCopy').addEventListener('click', ()=>copyText(ON.code||'', $('onCopy'), 'コードをコピー'));
+$('onCopy').addEventListener('click', ()=>copyText(ON.room||'', $('onCopy'), 'コードをコピー'));
 $('onCopyLink').addEventListener('click', ()=>copyText(inviteUrl(), $('onCopyLink'), '招待URLをコピー'));
 $('quit').addEventListener('click', ()=>{
-  if(mode==='online') leaveOnline();
-  else { $('result').hidden = true; ST = null; mode = null; showScreen('home'); }
+  if(mode==='online'){
+    if(ON.role==='player' && onLive()) askConfirm('降参しますか？', '対戦をやめると、相手の勝ちになります。', '降参する', ()=>onLeave());
+    else onLeave();
+  }
+  else { playGen++; $('result').hidden = true; ST = null; mode = null; showScreen('home'); }
 });
 
 // 招待URL（?room=xxxxx）から開いた場合はコードを入れておく
 (function(){
-  const code = new URLSearchParams(location.search).get('room');
-  if(code && /^[a-z0-9]{4,8}$/i.test(code) && PEER_OK){
+  const code = (new URLSearchParams(location.search).get('room') || '').toLowerCase();
+  if(ON_CODE_RE.test(code)){
     mode = 'online';
-    $('onCode').value = code.toLowerCase();
-    resetOnlineScreens(); showScreen('online');
-    note('招待されたルームのコードが入っています。「参加」を押してください。');
+    $('onCode').value = code;
+    showOnlinePanel('idle'); showScreen('online');
+    note('招待されたルームのコードが入っています。名前を入れて「参加」を押してください。');
   }
 })();
+// 前回の対戦・ルームが続いていれば「対戦に戻る」を出す
+onCheckResume();
 
 </script>
 </body>
