@@ -7,6 +7,15 @@
         { "fieldPath": "floor", "order": "DESCENDING" },
         { "fieldPath": "at", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "over", "order": "ASCENDING" },
+        { "fieldPath": "tt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

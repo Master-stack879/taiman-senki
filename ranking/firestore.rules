@@ -15,9 +15,10 @@ rules_version = '2';
 // 管理画面（Firebase コンソール）からの削除にはこのルールはかからない。
 //
 // オンライン対戦（docs/オンライン対戦サーバー化.md）。戦闘の計算はプレイヤーのブラウザで行い、結果をここに書く。
-// matches/{mid}             … 試合1件。誰でも1件ずつ読める（観戦）。書けるのはその試合の2人だけ。
+// matches/{mid}             … 試合1件。誰でも1件ずつ読める（観戦）。一覧は「いま対戦中のランダムマッチ」最大10件だけ。
+//                             書けるのはその試合の2人だけ。
 // matches/{mid}/picks/{A|B} … 選んだ技。本人だけが書ける。相手の技は、自分が同じターンの技を書いたあとでないと読めない。
-// matches/{mid}/preds/{uid} … 勝敗予想（ルームの対戦の観戦者だけ。1ターン目の決着まで）。
+// matches/{mid}/preds/{uid} … 勝敗予想（観戦者だけ。1ターン目の決着まで）。
 // rooms/{code}              … 友達と遊ぶルーム（座席2つ・名前・キャラ・準備・今の試合）。
 // queue/{uid}               … ランダムマッチの待ち行列。
 service cloud.firestore {
@@ -245,7 +246,13 @@ service cloud.firestore {
 
     match /matches/{mid} {
       allow get: if true;
-      allow list: if false;
+      // いま対戦中の試合の一覧（観戦用）：ランダムマッチ・決着前・期限内（ターン開始から turnSec() 以内）だけを、最大10件。
+      // クエリにこの3つの条件（kind == 'random'・over == null・tt > 期限の境目）と limit(10) 以下が入っていないと弾く。
+      // ルームの対戦は一覧に出さない（コードを知っている人だけが観戦する）
+      allow list: if request.query.limit <= 10
+        && resource.data.kind == 'random'
+        && resource.data.over == null
+        && resource.data.tt > now() - duration.value(turnSec(), 's');
       allow create: if request.auth != null && newMatch(request.resource.data)
         && (newRandomMatch(mid, request.resource.data) || newRoomMatch(mid, request.resource.data));
       allow update: if request.auth != null && (
@@ -282,12 +289,11 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      // 勝敗予想：観戦者（その試合のプレイヤー以外）が1人1件。ルームの対戦の1ターン目が決着するまで
+      // 勝敗予想：観戦者（その試合のプレイヤー以外）が1人1件。1ターン目が決着するまで（ルーム・ランダムマッチとも）
       match /preds/{pid} {
         allow get: if true;
         allow list: if request.query.limit <= 100;
         allow create: if request.auth != null && pid == uid()
-          && get(matchPath(mid)).data.kind == 'room'
           && get(matchPath(mid)).data.turn == 1 && get(matchPath(mid)).data.over == null
           && get(matchPath(mid)).data.p.A != uid() && get(matchPath(mid)).data.p.B != uid()
           && request.resource.data.keys().hasOnly(['side']) && request.resource.data.side in sides();

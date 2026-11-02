@@ -1,6 +1,6 @@
 // ゲーム本体（index.html）のオンライン対戦を、Firestore / Auth エミュレーター相手にブラウザで操作して確かめる
 //   npm run test:online
-// ランダムマッチ（決着まで）・ルーム（観戦・勝敗予想・再読み込みからの復帰・再戦・降参）・時間切れの不戦勝・
+// ランダムマッチ（決着まで・観戦URL・いま対戦中の試合の一覧・予想）・ルーム（観戦・勝敗予想・再読み込みからの復帰・再戦・降参）・時間切れの不戦勝・
 // 技がそろったまま期限が過ぎた試合の再開・名前を文字として表示・ネットにつながらないとき。最後に読み書きの回数を出す。
 // gstatic の Firebase SDK は node_modules/firebase の同じ版のファイルで代用する。index.html?rank-emulator でエミュレーターにつながる。
 // 読み書きの回数は、Firestore の SDK を数える薄い包み（下の COUNT_SHIM）に差し替えて数える（ゲームのコードは変えない）。
@@ -127,6 +127,7 @@ try {
   await openOnline(a, '<i>x</i>');
   await search(a, 'kai');
   check(/相手を探しています/.test(await text(a, '#onSearchMsg')), '「相手を探す」で待ち行列に入る');
+  check(await visible(a, '#onSearchSpec') && /観戦される場合があります/.test(await text(a, '#onSearchSpec')), '「相手を探す」の画面に観戦の案内: ' + await text(a, '#onSearchSpec'));
   await new Promise(r => setTimeout(r, 1500));
   await openOnline(b, 'ぼぶ');
   await search(b, 'gard');
@@ -141,6 +142,56 @@ try {
   check(/残り \d+秒/.test(await text(a, '#onTimer')), '残り時間を表示: ' + await text(a, '#onTimer'));
   const q = await admin(db => getDocs(collection(db, 'queue')));
   check(q.size === 0, '対戦が決まったら待ち行列は空になる（残り ' + q.size + '）');
+
+  // ---- ランダムマッチの観戦：観戦URL・いま対戦中の試合の一覧・勝敗予想 ----
+  check(await visible(a, '#onWatchCopy') && await visible(b, '#onWatchCopy'), 'ランダムマッチの対戦画面に「観戦URLをコピー」');
+  const wurl = await a.evaluate(() => watchUrl());
+  check(wurl.endsWith('?watch=' + m1), '観戦URLは試合の ID: ' + wurl);
+  // 一覧に出してはいけない試合（期限切れで止まっている・決着済み・ルームの対戦）を置く
+  await admin(async db => {
+    const base = (await getDoc(doc(db, 'matches', m1))).data();
+    await setDoc(doc(db, 'matches', 'zzOldMatch0000000001'), { ...base, tt: Timestamp.fromMillis(Date.now() - 200_000) });
+    await setDoc(doc(db, 'matches', 'zzDoneMatch000000001'), { ...base, over: 'A', end: 'ko' });
+    await setDoc(doc(db, 'matches', 'zzRoomMatch000000001'), { ...base, kind: 'room', room: 'abcde' });
+  });
+  const L = await newPage();
+  const l0 = await counts(L);
+  await L.click('#mode-online');
+  await L.waitForFunction(() => /選ぶと観戦|ありません|読めません/.test(document.getElementById('onLiveMsg').textContent), null, { timeout: 30000 });
+  const l1 = await counts(L);
+  const liveBtns = L.locator('#onLiveList button');
+  check(await liveBtns.count() === 1, '一覧は対戦中のランダムマッチだけ（期限切れ・決着済み・ルームは出ない）: ' + await liveBtns.count() + '件');
+  const liveText = await liveBtns.first().innerText();
+  check(liveText.includes('<i>x</i>') && liveText.includes('ぼぶ') && /カイ|TURN 1/.test(liveText) && await L.locator('#onLiveList i').count() === 0, '一覧に両者の名前（文字のまま）・キャラ・ターン: ' + liveText);
+  console.log(`     読み書き（一覧の表示1回・1件）：読み取り${l1.r - l0.r}・書き込み${l1.w - l0.w}`);
+  await L.click('#onLiveRefresh');
+  await L.waitForFunction(() => !document.getElementById('onLiveRefresh').disabled);
+  const l2 = await counts(L);
+  console.log(`     読み書き（「更新」1回・1件）：読み取り${l2.r - l1.r}`);
+  await liveBtns.first().click();
+  await inBattle(L);
+  check(await L.evaluate(() => ON.role === 'spec' && ON.kind === 'watch') && /観戦をやめる/.test(await text(L, '#quit')), '一覧から選ぶと観戦画面へ');
+  // 観戦URLから開く（名前の入力なしで観戦が始まる）
+  const v = await newPage();
+  await v.goto(url + '&watch=' + m1);
+  await inBattle(v);
+  check(await mid(v) === m1, '観戦URLを開くとその試合を観戦する');
+  await v.waitForSelector('#pred-A', { timeout: 20000 });
+  await v.click('#pred-A');
+  await L.waitForSelector('#pred-B', { timeout: 20000 });
+  await L.click('#pred-B');
+  await a.waitForFunction(() => /勝敗予想 .* 1 : 1 /.test(document.getElementById('predBar').textContent), null, { timeout: 20000 });
+  check(true, 'ランダムマッチでも観戦者が勝敗予想でき、プレイヤーにも票数が見える: ' + await text(a, '#predBar'));
+  check(await v.evaluate(() => !document.querySelector('#cmds .cmd')), '観戦者には技のボタンが出ない');
+  // 観戦者は技を読めず、試合にも書けない（観戦者のブラウザの SDK で試す）
+  const specTry = await v.evaluate(async m => {
+    const { fs, db } = ON.fb, out = {};
+    try { await fs.getDoc(fs.doc(db, 'matches', m, 'picks', 'A')); out.pick = 'read'; } catch (e) { out.pick = e.code; }
+    try { await fs.updateDoc(fs.doc(db, 'matches', m), { over: 'A', end: 'left' }); out.write = 'ok'; } catch (e) { out.write = e.code; }
+    return out;
+  }, m1);
+  check(specTry.pick === 'permission-denied' && specTry.write === 'permission-denied', '観戦者は技を読めず、試合に書けない: ' + JSON.stringify(specTry));
+  const v0 = await counts(v);
   const c0 = [await counts(a), await counts(b)];
   check(await playToEnd([a, b]), '決着まで遊べる');
   const ta = await text(a, '#resTitle'), tb = await text(b, '#resTitle');
@@ -154,6 +205,20 @@ try {
   console.log(`     読み書き（ランダムマッチ・観戦なし・${turns}ターン）：対戦中 読み取り${r}・書き込み${w}（1ターンあたり 読み取り${(r / turns).toFixed(1)}・書き込み${(w / turns).toFixed(1)}）、マッチングを含む全体 読み取り${ra}・書き込み${wa}`);
   check(await visible(a, '#resBtn0') && /もう一度相手を探す/.test(await text(a, '#resBtn0')), 'ランダムマッチのあとは「もう一度相手を探す」');
   check(await a.evaluate(() => localStorage.getItem('taiman-senki:online')) === null, '決着したら復帰用の保存は消える');
+  await Promise.all([resultShown(v), resultShown(L)]);
+  const v1 = await counts(v);
+  console.log(`     読み書き（ランダムマッチの観戦者1人・${turns}ターン・予想1件）：観戦URLから開いて決着まで 読み取り${v1.r}・書き込み${v1.w}（観戦を始めてからの対戦中 読み取り${v1.r - v0.r}、1ターンあたり ${((v1.r - v0.r) / turns).toFixed(1)}）`);
+  check(/予想的中！|予想はずれ…/.test(await text(v, '#resTitle')) && /観戦者の予想/.test(await text(v, '#resNote')), '観戦者に予想の当たり外れと票数: ' + await text(v, '#resTitle') + '｜' + await text(v, '#resNote'));
+  check(/観戦者の予想/.test(await text(a, '#resNote')), 'プレイヤーの結果にも予想の票数: ' + await text(a, '#resNote'));
+  check(/ほかの試合を観る/.test(await text(L, '#resBtn0')), '観戦の結果から「ほかの試合を観る」');
+  await L.click('#resBtn0');
+  await L.waitForSelector('#onIdle:not([hidden])');
+  await L.waitForFunction(() => /ありません/.test(document.getElementById('onLiveMsg').textContent), null, { timeout: 20000 });
+  check(await L.locator('#onLiveList button').count() === 0, '決着した試合は一覧から消える');
+  const nf = await newPage();
+  await nf.goto(url + '&watch=AAAAAAAAAAAAAAAAAAAA');
+  await nf.waitForFunction(() => /見つかりませんでした/.test(document.getElementById('onNote').textContent), null, { timeout: 20000 });
+  check(true, '無い試合の観戦URLは「見つかりませんでした」');
 
   // ---- ルーム：作る・参加・観戦・予想・再読み込みから復帰・再戦・降参 ----
   const hctx = await browser.newContext(), gctx = await browser.newContext();

@@ -95,6 +95,9 @@ h2{font-family:var(--font-pixel);font-weight:400;font-size:19px;margin:0}
 input[type=text]{all:unset;box-sizing:border-box;background:var(--well);color:var(--ink);font-family:var(--font-pixel);font-size:18px;letter-spacing:.2em;padding:8px 12px;border-radius:5px;width:9em}
 input[type=text]:focus-visible{outline:2px solid var(--accent)}
 .note{margin:0;font-size:13px;color:var(--accent);min-height:1.2em}
+.liveHead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.liveList{display:flex;flex-direction:column;gap:8px}
+.liveList .btn{text-align:left;font-size:13px;letter-spacing:0;line-height:1.5;white-space:normal}
 .lobby{flex-direction:row;justify-content:space-between;align-items:center;flex-wrap:wrap}
 .code{font-family:var(--font-pixel);font-size:34px;letter-spacing:.3em;color:var(--accent);line-height:1.2}
 .lobbyStatus{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;font-size:14px}
@@ -303,9 +306,15 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
           <button class="btn" type="submit">参加</button>
         </form>
       </div>
+      <div class="panel" id="onLiveBox">
+        <div class="liveHead"><h3 class="h3" style="margin:0">いま対戦中の試合</h3><button class="btn" id="onLiveRefresh" type="button">更新</button></div>
+        <div class="liveList" id="onLiveList"></div>
+        <p class="muted" id="onLiveMsg" style="margin:0"></p>
+      </div>
     </div>
     <div id="onSearchBox" class="panel" hidden>
       <p style="margin:0" id="onSearchMsg"></p>
+      <p class="muted" id="onSearchSpec" style="margin:0">ランダムマッチは観戦される場合があります（観戦者は勝敗予想もできます）。</p>
       <div class="roster" id="onSearchRoster"></div>
       <div class="onRow" id="onSearchBtns"></div>
     </div>
@@ -349,6 +358,7 @@ button.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     <p class="onTimer" id="onTimer" role="status" hidden></p>
     <p class="cmdHead" id="cmdHead"></p>
     <div class="cmds" id="cmds"></div>
+    <button class="link" id="onWatchCopy" type="button" hidden>観戦URLをコピー</button>
     <button class="link" id="quit" type="button">モード選択に戻る</button>
   </section>
 </main>
@@ -653,6 +663,8 @@ function beginMatch(st, bottom){
   $('msg').innerHTML = '';
   $('result').hidden = true;
   $('quit').textContent = mode==='online' ? (ON.role==='spec' ? '観戦をやめる' : '降参して退出する') : mode==='rogue' ? '中断してモード選択へ（続きから再開できます）' : 'モード選択に戻る';
+  // ランダムマッチの対戦画面には観戦URLを出す（プレイヤー・観戦者とも）
+  $('onWatchCopy').hidden = !(mode==='online' && ON.m?.kind==='random');
   showScreen('battle');
   if(mode==='online') onNameTags();
   renderBars(); renderCommands(); renderPredBar();
@@ -1404,7 +1416,7 @@ const RK_CONFIG = {
   appId: "1:243084106210:web:0563a291feeedb6bab81bb"
 };
 const RK_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
-const RK_VER = '2026-10-20c';                   // 記録に入れるゲームのバージョン（16文字以内）
+const RK_VER = '2026-11-02';                   // 記録に入れるゲームのバージョン（16文字以内）
 const RK_NAME = 'taiman-senki:rogue-name';      // 前回入れた名前
 const RK_PENDING = 'taiman-senki:rank-pending'; // まだ送れていない記録 {v:1, list:[{id, name, char, floor, tries}]}
 const RK_TOP = 20, RK_TIMEOUT = 15000, RK_TRIES = 5, RK_KEEP = 10;
@@ -2046,6 +2058,8 @@ const ON_ROOM_HOURS = 2;    // ルームは最後に動きがあってから2時
 const ON_SAVE = 'taiman-senki:online';   // 参加中の試合・ルーム {v:1, kind, side, mid, room}（再読み込みから戻るため）
 const ON_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';   // ルームコード：見間違えやすい i/l/o/0/1 を除く
 const ON_CODE_RE = /^[a-hjkmnp-z2-9]{5}$/;
+const ON_MID_RE = /^[A-Za-z0-9]{20}$/;   // 試合の ID（Firestore の自動 ID）。観戦URL（?watch=）で使う
+const ON_LIVE_MAX = 10;     // 「いま対戦中の試合」に出す最大件数（rules の matches の list と同じ上限）
 const ON = {};
 function resetOnline(){
   for(const f of Object.values(ON.unsub || {})) try{ f?.(); }catch(e){}
@@ -2080,6 +2094,7 @@ const onWhy = e => e?.code==='permission-denied' ? 'サーバーに受け付け�
   : 'ネットにつながっていないか、サーバーに接続できませんでした';
 function randCode(){ return Array.from(crypto.getRandomValues(new Uint8Array(5)), x=>ON_CODE_CHARS[x%31]).join(''); }
 function inviteUrl(){ return location.origin + location.pathname + '?room=' + ON.room; }
+function watchUrl(){ return location.origin + location.pathname + '?watch=' + ON.mid; }
 function onSaveNow(){ lsSet(ON_SAVE, ON.role==='player' ? {v:1, kind:ON.kind, side:ON.side, mid:ON.mid, room:ON.room} : null); }
 function onSaved(){
   const s = lsGet(ON_SAVE);
@@ -2119,7 +2134,7 @@ function onWatchMatch(mid){
   const {fs, db} = ON.fb;
   ON.unsub.match = fs.onSnapshot(fs.doc(db, 'matches', mid), {includeMetadataChanges:true},
     snap=>onMatchSnap(mid, snap), ()=>{ if(ON.mid===mid) note('対戦の情報を読めませんでした。'); });
-  if(ON.kind==='room') ON.unsub.preds = fs.onSnapshot(fs.query(fs.collection(db, 'matches', mid, 'preds'), fs.limit(100)), snap=>{
+  ON.unsub.preds = fs.onSnapshot(fs.query(fs.collection(db, 'matches', mid, 'preds'), fs.limit(100)), snap=>{
     if(ON.mid!==mid) return;
     let a = 0, b = 0, mine = null;
     snap.forEach(d=>{ const s = d.data().side; if(s==='A') a++; else if(s==='B') b++; if(d.id===ON.fb.uid) mine = s; });
@@ -2131,7 +2146,10 @@ function onWatchMatch(mid){
 function onMatchSnap(mid, snap){
   if(ON.mid!==mid) return;
   ON.offline = snap.metadata.fromCache;
-  if(!snap.exists()) return;
+  if(!snap.exists()){
+    if(ON.kind==='watch' && !snap.metadata.fromCache){ onLeave(true); note('その試合は見つかりませんでした。'); }
+    return;
+  }
   const m = snap.data({serverTimestamps:'estimate'});
   if(!onValidMatch(m)) return;
   const prev = ON.m; ON.m = m;
@@ -2523,6 +2541,58 @@ function onKick(){
   });
 }
 
+/* ---------- 観戦（ランダムマッチ：いま対戦中の試合の一覧・観戦URL） ---------- */
+// 一覧は画面を開いたときと「更新」を押したときだけ読む（常時の自動更新はしない）。
+// ルールで読めるのは「ランダムマッチ・決着前・期限内（tt からON_TURN_SEC 以内）」を最大10件だけ。
+// 並びはルールの都合でターン開始の新しい順に読み、表示は試合の新しい順（at）に並べ直す
+let onLiveSeq = 0;
+async function onLoadLive(){
+  const seq = ++onLiveSeq, list = $('onLiveList'), msg = $('onLiveMsg');
+  msg.textContent = '読み込んでいます…'; $('onLiveRefresh').disabled = true;
+  const read = async (fs, db, windowSec) => fs.getDocs(fs.query(fs.collection(db, 'matches'),
+    fs.where('kind', '==', 'random'), fs.where('over', '==', null),
+    fs.where('tt', '>', fs.Timestamp.fromMillis(onNow() - windowSec*1000)), fs.orderBy('tt', 'desc'), fs.limit(ON_LIVE_MAX)));
+  try{
+    const {fs, db} = await rkTimeout(rkFirebase());
+    let snap;
+    // 境目はサーバーの時刻で判定される。端末の時計が遅れていると弾かれるので、そのときは境目を新しくして1回だけ読み直す
+    try{ snap = await rkTimeout(read(fs, db, ON_TURN_SEC - 10)); }
+    catch(e){ if(e?.code!=='permission-denied') throw e; snap = await rkTimeout(read(fs, db, 20)); }
+    if(seq!==onLiveSeq) return;
+    const now = onNow();
+    const ms = snap.docs.map(d=>({id:d.id, m:d.data()})).filter(({id, m})=>ON_MID_RE.test(id) && onValidMatch(m) && m.kind==='random'
+      && !m.over && m.here.B && onTurnEnd(m) > now && isRosterId(m.chars.A) && isRosterId(m.chars.B)
+      && ['A','B'].every(s=>rkCheckName(m.names[s]).name===m.names[s]));
+    ms.sort((x, y)=>(onMs(y.m.at) ?? 0) - (onMs(x.m.at) ?? 0));
+    list.innerHTML = '';
+    for(const {id, m} of ms){
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.id = 'onLive-' + id;
+      // 名前は必ず文字として入れる
+      b.textContent = `${m.names.A}（${CHAR[m.chars.A].name}） vs ${m.names.B}（${CHAR[m.chars.B].name}）｜TURN ${m.turn}`;
+      b.addEventListener('click', ()=>onSpectate(id));
+      list.append(b);
+    }
+    msg.textContent = ms.length ? '選ぶと観戦できます（勝敗予想は1ターン目が終わるまで）。' : 'いま対戦中のランダムマッチはありません。';
+  }catch(e){
+    if(seq!==onLiveSeq) return;
+    list.innerHTML = '';
+    msg.textContent = `試合の一覧を読めませんでした（${onWhy(e)}）。`;
+  }finally{ if(seq===onLiveSeq) $('onLiveRefresh').disabled = false; }
+}
+// 試合を観戦する（一覧・観戦URL）。名前の入力は要らない（勝敗予想に名前は使わない）
+async function onSpectate(mid){
+  if(!ON_MID_RE.test(mid)) return;
+  if(ON.role==='player' && onLive()) return;
+  onStopSearch();
+  note('観戦の準備をしています…');
+  try{
+    await rkTimeout(onFb());
+    mode = 'online';
+    Object.assign(ON, {kind:'watch', role:'spec', side:null, room:null, roomData:null});
+    onWatchMatch(mid);
+  }catch(e){ note(`観戦を始められませんでした（${onWhy(e)}）。`); }
+}
+
 /* ---------- 退出・復帰 ---------- */
 // 対戦中のプレイヤーが出るときは降参（相手の勝ち）。ルームの席を空け、待ち行列から外れる
 function onLeave(stayOnOnlineScreen){
@@ -2583,6 +2653,7 @@ function onShowEnd(){
     // ランダムマッチの取り消し（相手が参加を確かめなかった）：探し直す
     $('result').hidden = true;
     if(ON.role==='player' && ON.kind==='random'){ const c = m.chars[me]; onLeave(true); showOnlinePanel('search'); onStartSearch(c, true); }
+    else if(ON.kind==='watch'){ onLeave(true); note('この試合は取り消されました（相手が参加しませんでした）。'); }
     return;
   }
   const loser = over==='draw' ? null : other(over);
@@ -2592,11 +2663,16 @@ function onShowEnd(){
     : end==='left' ? (isSpec() ? `${m.names[loser]}が対戦をやめました（降参）` : over===me ? '相手が対戦をやめました（降参）' : '降参しました')
     : `${ST?.turn ?? m.turn}ターンで決着`;
   const sub = `${nm('A')} vs ${nm('B')}｜${why}`;
-  const pv = ON.preds, predNote = m.kind==='room' && (pv.a+pv.b)>0 ? `観戦者の予想：${m.names.A} ${pv.a}票 / ${m.names.B} ${pv.b}票` : '';
+  const pv = ON.preds, predNote = (pv.a+pv.b)>0 ? `観戦者の予想：${m.names.A} ${pv.a}票 / ${m.names.B} ${pv.b}票` : '';
   if(isSpec()){
     const winner = over==='draw' ? '引き分け' : `${whoLabel(over)} ${m.names[over]}の勝利！`;
     const hit = ON.myPred ? (ON.myPred===over ? '予想的中！' : '予想はずれ…') : '';
-    setResult(hit || winner, hit==='予想はずれ…' ? 'small lose' : 'small', hit ? `${winner}｜${sub}` : sub, [
+    const title = hit || winner, cls = hit==='予想はずれ…' ? 'small lose' : 'small', detail = hit ? `${winner}｜${sub}` : sub;
+    // 一覧・観戦URLから観ている試合（ランダムマッチ）は、その試合で終わり。ルームの観戦は次の試合へ自動で切り替わる
+    if(ON.kind==='watch') setResult(title, cls, detail, [
+      {label:'ほかの試合を観る', primary:true, fn:()=>onLeave(true)},
+      {label:'モード選択に戻る', fn:()=>onLeave()}], predNote);
+    else setResult(title, cls, detail, [
       {label:'観戦を続ける', primary:true, fn:()=>{ $('result').hidden = true; renderCommands(); }},
       {label:'ルームを出る', fn:()=>onLeave()}],
       [predNote, '次の対戦が始まると自動で切り替わります'].filter(Boolean).join('｜'));
@@ -2609,7 +2685,7 @@ function onShowEnd(){
     const c = m.chars[me];
     setResult(t, cls, sub, [
       {label:'もう一度相手を探す', primary:true, fn:()=>{ onLeave(true); showOnlinePanel('search'); onStartSearch(c); }},
-      leave]);
+      leave], predNote);
   } else {
     setResult(t, cls, sub, [
       {label:'再戦する', primary:true, fn:onRematch},
@@ -2626,7 +2702,11 @@ function showOnlinePanel(which){
   $('onSearchBox').hidden = which!=='search';
   $('onRole').hidden = which!=='role';
   $('onLobby').hidden = which!=='lobby';
-  if(which==='idle'){ $('onName').value = $('onName').value || rkSavedName(); $('onNameErr').textContent = ''; }
+  if(which==='idle'){
+    $('onName').value = $('onName').value || rkSavedName(); $('onNameErr').textContent = '';
+    // 続けて別の画面に切り替えることがある（もう一度探すなど）ので、最初の画面のままのときだけ一覧を読む
+    setTimeout(()=>{ if(!$('onIdle').hidden && !$('online').hidden) onLoadLive(); }, 0);
+  }
 }
 function showRolePicker(){
   mode = 'online';
@@ -2677,7 +2757,7 @@ function renderLobby(){
 }
 function renderPredBar(){
   const el = $('predBar'), m = ON.m;
-  if(mode!=='online' || !m || !ST || m.kind!=='room'){ el.hidden = true; return; }
+  if(mode!=='online' || !m || !ST){ el.hidden = true; return; }
   const {a, b} = ON.preds, open = m.turn===1 && !m.over;
   if(!(a+b) && !open){ el.hidden = true; return; }
   el.textContent = [`勝敗予想 ${m.names.A} ${a} : ${b} ${m.names.B}`, open ? '予想受付中' : ''].filter(Boolean).join('｜');
@@ -2687,7 +2767,7 @@ function specPanel(){
   const d = document.createElement('div'); d.className = 'waitPanel';
   const m = ON.m;
   const nameOf = s => `${whoLabel(s)} ${m.names[s]}（${unitOf(ST[s]).name}）`;
-  if(!matchOver && m.kind==='room' && m.turn===1 && !m.over && !ON.myPred){
+  if(!matchOver && m.turn===1 && !m.over && !ON.myPred && !(m.kind==='random' && !m.here.B)){
     d.innerHTML = '<p>どちらが勝つと思う？</p><small>1ターン目が終わるまで予想できます</small>';
     const row = document.createElement('div'); row.className = 'predRow';
     ['A','B'].forEach(s=>{
@@ -2706,7 +2786,7 @@ function specPanel(){
   const turnOk = m.turn===ST.turn;
   const st = s => (turnOk && m.ready[s]===m.turn) ? '選択済み' : '考え中…';
   let main, sub;
-  if(matchOver){ main = '決着しました'; sub = '次の対戦が始まると自動で切り替わります'; }
+  if(matchOver){ main = '決着しました'; sub = ON.kind==='room' ? '次の対戦が始まると自動で切り替わります' : ''; }
   else if(busy){ main = '行動中…'; sub = ''; }
   else { main = `観戦中｜TURN ${ST.turn}`; sub = `1P：${st('A')}　2P：${st('B')}`; }
   if(ON.myPred) sub = [sub, `あなたの予想：${nameOf(ON.myPred)}`].filter(Boolean).join('｜');
@@ -2778,10 +2858,12 @@ function copyText(text, btn, label){
 }
 $('onCopy').addEventListener('click', ()=>copyText(ON.room||'', $('onCopy'), 'コードをコピー'));
 $('onCopyLink').addEventListener('click', ()=>copyText(inviteUrl(), $('onCopyLink'), '招待URLをコピー'));
+$('onWatchCopy').addEventListener('click', ()=>copyText(watchUrl(), $('onWatchCopy'), '観戦URLをコピー'));
+$('onLiveRefresh').addEventListener('click', ()=>onLoadLive());
 $('quit').addEventListener('click', ()=>{
   if(mode==='online'){
     if(ON.role==='player' && onLive()) askConfirm('降参しますか？', '対戦をやめると、相手の勝ちになります。', '降参する', ()=>onLeave());
-    else onLeave();
+    else onLeave(ON.kind==='watch');   // 一覧・観戦URLからの観戦をやめたら、オンライン対戦の最初の画面（試合の一覧）へ
   }
   else { playGen++; $('result').hidden = true; ST = null; mode = null; showScreen('home'); }
 });
@@ -2795,6 +2877,14 @@ $('quit').addEventListener('click', ()=>{
     showOnlinePanel('idle'); showScreen('online');
     note('招待されたルームのコードが入っています。名前を入れて「参加」を押してください。');
   }
+})();
+// 観戦URL（?watch=試合ID）から開いた場合は、その試合の観戦を始める
+(function(){
+  const mid = new URLSearchParams(location.search).get('watch') || '';
+  if(!ON_MID_RE.test(mid)) return;
+  mode = 'online';
+  showOnlinePanel('idle'); showScreen('online');
+  onSpectate(mid);
 })();
 // 前回の対戦・ルームが続いていれば「対戦に戻る」を出す
 onCheckResume();
