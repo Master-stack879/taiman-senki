@@ -224,9 +224,44 @@ test('オンライン：勝敗予想は観戦者が1人1件、1ターン目の�
   if (snap.size !== 1) throw new Error('予想の数が違う');
   await putMatch('m2', { turn: 2 });
   await assertFails(setDoc(doc(user('s3'), 'matches/m2/preds/s3'), { side: 'A' }));
-  // ランダムマッチには予想できない
+  // ランダムマッチにも予想できる（締め切りは同じ。プレイヤーは不可）
   await putMatch('m3', { kind: 'random' });
-  await assertFails(setDoc(doc(user('s4'), 'matches/m3/preds/s4'), { side: 'A' }));
+  await assertSucceeds(setDoc(doc(user('s4'), 'matches/m3/preds/s4'), { side: 'A' }));
+  await assertFails(setDoc(doc(user('pb'), 'matches/m3/preds/pb'), { side: 'B' }));
+  await putMatch('m4', { kind: 'random', turn: 2 });
+  await assertFails(setDoc(doc(user('s5'), 'matches/m4/preds/s5'), { side: 'A' }));
+  await putMatch('m5', { kind: 'random', over: 'A' });
+  await assertFails(setDoc(doc(user('s6'), 'matches/m5/preds/s6'), { side: 'A' }));
+});
+
+test('観戦：いま対戦中のランダムマッチの一覧は、決着前・期限内・最大10件の読み方だけ', async () => {
+  await putMatch('live1', { kind: 'random', tt: ago(5) });
+  await putMatch('live2', { kind: 'random', tt: ago(30), turn: 3 });
+  await putMatch('old', { kind: 'random', tt: ago(200) });            // 期限切れで止まっている
+  await putMatch('done', { kind: 'random', tt: ago(5), over: 'A' });  // 決着済み
+  await putMatch('room', { kind: 'room', tt: ago(5) });               // ルームの対戦は出さない
+  const ms = collection(anon(), 'matches');
+  const since = sec => Timestamp.fromMillis(Date.now() - sec * 1000);
+  const q = (...c) => query(ms, ...c);
+  const ok = q(where('kind', '==', 'random'), where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10));
+  const snap = await assertSucceeds(getDocs(ok));
+  const ids = snap.docs.map(d => d.id).sort().join(',');
+  if (ids !== 'live1,live2') throw new Error('一覧が違う: ' + ids);
+  // ログインしていなくても、ログインしていても読める
+  await assertSucceeds(getDocs(query(collection(user('x'), 'matches'), where('kind', '==', 'random'), where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10))));
+  // 条件が足りない・広すぎる読み方は弾く
+  await assertFails(getDocs(q(limit(10))));
+  await assertFails(getDocs(q(where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('over', '==', null), limit(10))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('over', '==', null), where('tt', '>', since(120)), orderBy('tt', 'desc'), limit(10))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(11))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'))));
+  await assertFails(getDocs(q(where('kind', '==', 'room'), where('over', '==', null), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10))));
+  await assertFails(getDocs(q(where('kind', '==', 'random'), where('over', '==', 'A'), where('tt', '>', since(60)), orderBy('tt', 'desc'), limit(10))));
+  // 一覧から観戦しても、技は読めず、試合にも書けない
+  await assertFails(getDoc(doc(anon(), 'matches/live1/picks/A')));
+  await assertFails(updateDoc(doc(user('spec'), 'matches/live1'), { 'ready.A': 1 }));
 });
 
 // ---- ランダムマッチ ----
